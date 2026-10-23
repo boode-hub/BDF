@@ -1,0 +1,15 @@
+[package]
+name = "bdf-core"
+description = "Document engine for BDF: PDFium access, layout, render scheduling, text search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pdfium-render.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true
