@@ -62,4 +62,26 @@ shot ui-form
 x mousemove 44 15 click 1; x mousemove 75 124 click 1   # File > Save
 sleep 3
 if grep -aqE "/AS ?/Yes" "$work/form.pdf"; then echo "ok: checkbox value saved"; else echo "FAIL: checkbox value not saved"; fail=1; fi
+kill $APP 2>/dev/null || true
+
+# Split view: closing the last tab of either pane must close only that tab.
+"$BIN" --generate 3 "$work/a.pdf"; "$BIN" --generate 4 "$work/b.pdf"
+split_close() { # $1: x of the tab close button to click, $2: the file left open
+  BDF_DATA_DIR="$work/data3" "$BIN" "$work/a.pdf" "$work/b.pdf" >"$work/app3.log" 2>&1 & APP=$!
+  for _ in $(seq 1 50); do xdotool search --name "b.pdf" >/dev/null 2>&1 && break; sleep 0.2; done
+  sleep 2
+  x mousemove 350 91 click 3; x mousemove 410 175 click 1   # b.pdf tab > Move to split view
+  sleep 1
+  x mousemove "$1" 91 click 1
+  sleep 1
+  if kill -0 $APP 2>/dev/null && ! grep -q panicked "$work/app3.log" \
+     && xdotool search --name "$2" >/dev/null 2>&1; then
+    echo "ok: split view, closing one tab keeps $2 open"
+  else
+    echo "FAIL: split view, closing one tab closed BDF"; cat "$work/app3.log"; fail=1
+  fi
+  kill $APP 2>/dev/null || true; sleep 0.5
+}
+split_close 833 a.pdf   # right pane
+split_close 299 b.pdf   # left pane
 exit $fail

@@ -15,7 +15,7 @@ use eframe::egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, KeyboardShortcut, Modifiers, Rect,
     TextureHandle, TextureOptions, ViewportCommand, pos2, vec2,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -174,6 +174,10 @@ pub struct BdfApp {
     next_ticket: u64,
     edits: HashMap<u64, Edit>,
     saves: HashMap<u64, DocId>,
+    /// Documents whose tabs close once their save succeeds ("Save" when closing).
+    close_after_save: HashSet<DocId>,
+    /// A tab was closed or moved out of a pane, which may have emptied it.
+    pane_emptied: bool,
     quit_after_save: bool,
     allow_close: bool,
     pub perf: Perf,
@@ -261,6 +265,8 @@ impl BdfApp {
             next_ticket: 1,
             edits: HashMap::new(),
             saves: HashMap::new(),
+            close_after_save: HashSet::new(),
+            pane_emptied: false,
             quit_after_save: false,
             allow_close: false,
             perf: Perf::default(),
@@ -475,10 +481,31 @@ impl BdfApp {
         if !others {
             self.release_doc(doc);
         }
-        // An empty second pane closes the split.
-        if self.panes.len() > 1 && self.panes[pane].tabs.is_empty() {
-            self.panes.remove(pane);
-            self.active_pane = 0;
+        // An emptied pane is removed by `collapse_empty_pane`, not here: this
+        // runs while the panes are being drawn.
+        self.pane_emptied = true;
+    }
+
+    /// Closing the last tab of a pane closes the split view. Runs between
+    /// frames only, never while the panes are drawn, since removing a pane
+    /// shifts their indices.
+    fn collapse_empty_pane(&mut self) -> bool {
+        if !std::mem::take(&mut self.pane_emptied) || self.panes.len() < 2 {
+            return false;
+        }
+        let Some(empty) = self.panes.iter().position(|p| p.tabs.is_empty()) else {
+            return false;
+        };
+        self.panes.remove(empty);
+        self.active_pane = 0;
+        true
+    }
+
+    /// "Save" when closing: close the document's tabs once the save succeeds.
+    pub fn save_and_close(&mut self, ctx: &Context, doc: DocId) {
+        self.save(ctx, doc, false);
+        if self.docs.get(&doc).is_some_and(|d| d.saving) {
+            self.close_after_save.insert(doc);
         }
     }
 
@@ -557,10 +584,8 @@ impl BdfApp {
         self.panes[target].tabs.push(tab);
         self.panes[target].active = self.panes[target].tabs.len() - 1;
         self.active_pane = target;
-        if self.panes[pane].tabs.is_empty() {
-            self.panes.remove(pane);
-            self.active_pane = 0;
-        }
+        // A now-empty source pane is removed by `collapse_empty_pane`.
+        self.pane_emptied = true;
     }
 
     // ---------------------------------------------------------------------
@@ -833,6 +858,9 @@ impl BdfApp {
                         }
                         self.settings.touch_recent(&target);
                         self.toast(ctx, format!("Saved {name}"), false);
+                        if self.close_after_save.remove(&doc) {
+                            self.close_doc_everywhere(doc);
+                        }
                         if self.quit_after_save
                             && self.saves.is_empty()
                             && !self.docs.values().any(|d| d.dirty)
@@ -846,6 +874,7 @@ impl BdfApp {
                             d.saving = false;
                         }
                         self.quit_after_save = false;
+                        self.close_after_save.remove(&doc);
                         self.show_dialog(Dialog::Error {
                             title: format!("Could not save {name}"),
                             text: e,
@@ -1431,7 +1460,26 @@ impl BdfApp {
         if take(sc(cmd, Key::P)) {
             self.print(ctx);
         }
-        if take(sc(cmd, Key::W)) || take(sc(cmd, Key::F4)) {
+        // Only a fresh press closes a tab: holding Ctrl+W must not close one
+        // tab after another as the key repeats.
+        let close_pressed = ctx.input_mut(|i| {
+            let mut fresh = false;
+            i.events.retain(|e| match e {
+                egui::Event::Key {
+                    key: Key::W | Key::F4,
+                    pressed: true,
+                    repeat,
+                    modifiers,
+                    ..
+                } if modifiers.matches_logically(cmd) => {
+                    fresh |= !repeat;
+                    false
+                }
+                _ => true,
+            });
+            fresh
+        });
+        if close_pressed {
             let p = &self.panes[pane];
             if !p.tabs.is_empty() {
                 self.close_tab(pane, p.active, false);
@@ -1719,10 +1767,13 @@ impl BdfApp {
         let tab_h = if self.fullscreen { 0.0 } else { 34.0 };
         let strip = Rect::from_min_size(rect.min, vec2(rect.width(), tab_h));
         let body = Rect::from_min_max(pos2(rect.min.x, rect.min.y + tab_h), rect.max);
+        if index >= self.panes.len() {
+            return false;
+        }
         if !self.fullscreen {
             self.tab_strip(ui, ctx, index, strip);
         }
-        if self.panes[index].tabs.is_empty() {
+        if self.panes.get(index).is_none_or(|p| p.tabs.is_empty()) {
             self.welcome(ui, ctx, index, body);
             return false;
         }
@@ -1963,6 +2014,7 @@ impl eframe::App for BdfApp {
         }
 
         self.shortcuts(&ctx);
+        self.collapse_empty_pane();
         if self
             .find
             .edited
@@ -1986,6 +2038,9 @@ impl eframe::App for BdfApp {
                 self.draw_panes(ui, &ctx);
             }
         });
+        if self.collapse_empty_pane() {
+            ctx.request_repaint();
+        }
         self.dialogs(&ctx);
         self.toasts_ui(&ctx);
         self.drop_files(&ctx);

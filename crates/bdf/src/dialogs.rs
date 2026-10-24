@@ -218,7 +218,7 @@ impl BdfApp {
                     ui.label(format!("“{name}” has annotations that are not saved."));
                     buttons(ui, |ui| {
                         if primary(ui, "Save") {
-                            self.save(ctx, doc, false);
+                            self.save_and_close(ctx, doc);
                             outcome = Outcome::Close;
                         }
                         if secondary(ui, "Don't save") {
