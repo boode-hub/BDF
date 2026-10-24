@@ -303,7 +303,7 @@ impl BdfApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{} annotation(s)", d.annots.items.len())).strong());
             if !d.annots.complete {
-                ui.add(egui::Spinner::new().size(12.0));
+                crate::theme::spinner(ui, 14.0);
                 ui.weak(format!("{} / {}", d.annots.pages_done, d.page_count()));
             }
         });
@@ -377,7 +377,7 @@ impl BdfApp {
                 RichText::new(format!("{} result(s) for “{}”", s.hits.len(), s.query)).strong(),
             );
             if !s.done {
-                ui.add(egui::Spinner::new().size(12.0));
+                crate::theme::spinner(ui, 14.0);
             }
         });
         let mut nav = None;

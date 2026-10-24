@@ -11,6 +11,10 @@ pub struct TextChar {
     /// Loose box in user space `[left, bottom, right, top]`; `None` for
     /// characters PDFium synthesises (inferred spaces and line breaks).
     pub rect: Option<[f32; 4]>,
+    /// The glyph draws nothing visible: invisible render mode over a blank
+    /// area, covered, clipped, white on white, a hidden layer, off the page.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -348,16 +352,22 @@ mod tests {
                 } else {
                     Some([x, top - 12.0, x + 10.0, top])
                 };
-                chars.push(TextChar { ch, rect });
+                chars.push(TextChar {
+                    ch,
+                    rect,
+                    hidden: false,
+                });
             }
             if li + 1 < lines.len() {
                 chars.push(TextChar {
                     ch: '\r',
                     rect: None,
+                    hidden: false,
                 });
                 chars.push(TextChar {
                     ch: '\n',
                     rect: None,
+                    hidden: false,
                 });
             }
         }
@@ -422,20 +432,24 @@ mod tests {
         p.chars.push(TextChar {
             ch: '\u{2}',
             rect: Some([110.0, 788.0, 115.0, 800.0]),
+            hidden: false,
         });
         p.chars.push(TextChar {
             ch: '\r',
             rect: None,
+            hidden: false,
         });
         p.chars.push(TextChar {
             ch: '\n',
             rect: None,
+            hidden: false,
         });
         for (i, ch) in "ated".chars().enumerate() {
             let x = 50.0 + i as f32 * 10.0;
             p.chars.push(TextChar {
                 ch,
                 rect: Some([x, 768.0, x + 10.0, 780.0]),
+                hidden: false,
             });
         }
         assert_eq!(found(&p, "hyphenated", Default::default()).len(), 1);

@@ -1,6 +1,8 @@
 # BDF
 
-A fast, portable PDF reader for Windows, macOS and Linux, written in Rust.
+A fast, portable PDF reader for Windows, macOS and Linux, written in Rust,
+dressed in Sharingan crimson and black (a Mangekyou eye is the logo, and a
+spinning three-tomoe eye shows while pages load).
 
 * **Portable.** Unzip and run. No installer, no admin rights, no registry.
   Settings, bookmarks and the log live in `BDF-data/` next to the program.
@@ -18,6 +20,7 @@ A fast, portable PDF reader for Windows, macOS and Linux, written in Rust.
 | Search | Find as you type, match case, whole words, all hits highlighted, results list with context; ignores line breaks and hyphenation, matches ligatures and curly quotes |
 | Text | Select (drag, double-click word, triple-click line, across pages) and copy |
 | Markup | Highlight, underline, strikeout, sticky notes, pen, rectangle, ellipse; edit or delete; undo/redo; saved into the PDF so other readers see them |
+| Smart highlighting | Selection follows what you see: hidden text (covered, white on white, invisible, switched-off layers, off the page) is ignored, columns are kept apart, and highlights snap to whole words — see `crates/bdf-core/src/visual.rs` |
 | Forms | Fill in text fields, checkboxes, radio buttons, drop-downs and lists; fillable fields are tinted; values save into the PDF |
 | Tools | Magnifier loupe, hand tool, middle-mouse panning |
 | Files | Open recent, drag and drop, password-protected PDFs, document properties, print |
@@ -35,7 +38,8 @@ crates/bdf-core   document engine, no UI; fully unit tested
   worker.rs       engine thread: priorities, cancellation, search jobs
   layout.rs       page positions for every layout mode
   geom.rs         PDF space <-> screen space, rotation
-  text.rs         search, selection, highlight rectangles
+  text.rs         search over extracted text
+  visual.rs       selection by visible lines and columns (smart highlighting)
   cache.rs        byte-bounded LRU for page images
   settings.rs     portable settings, per-document memory
   testpdf.rs      tiny PDF writer for tests and benchmarks

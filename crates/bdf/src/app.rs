@@ -211,6 +211,7 @@ impl BdfApp {
         let ctx = cc.egui_ctx.clone();
         theme::install_fonts(&ctx);
         theme::apply_both(&ctx);
+        theme::install_art(&ctx);
         ctx.set_theme(match settings.theme {
             ThemePref::System => egui::ThemePreference::System,
             ThemePref::Light => egui::ThemePreference::Light,
@@ -1351,10 +1352,8 @@ impl BdfApp {
         if let Some((d, v)) = self.active_mut() {
             let p = v.current_page;
             if let Some(pd) = d.peek_page_data(p as u32) {
-                v.selection = Some(view::TextSel {
-                    start: (p, 0),
-                    end: (p, pd.text.len()),
-                });
+                let chars = pd.text.select_all_visible();
+                v.selection = Some(view::TextSel::Chars { page: p, chars });
             }
         }
     }

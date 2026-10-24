@@ -989,6 +989,7 @@ mod tests {
                     .map(|(i, ch)| TextChar {
                         ch,
                         rect: Some([i as f32, 0.0, i as f32 + 1.0, 1.0]),
+                        hidden: false,
                     })
                     .collect(),
             })

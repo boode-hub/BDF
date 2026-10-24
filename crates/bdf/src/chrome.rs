@@ -94,7 +94,10 @@ impl BdfApp {
                 egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 2)),
             )
             .show(ui, |ui| {
-                egui::MenuBar::new().ui(ui, |ui| self.menus(ui, ctx));
+                egui::MenuBar::new().ui(ui, |ui| {
+                    crate::theme::logo(ui, 18.0).on_hover_text("BDF");
+                    self.menus(ui, ctx)
+                });
             });
         egui::Panel::top("toolbar")
             .frame(
@@ -745,7 +748,7 @@ impl BdfApp {
                             }
                             if d.saving {
                                 ui.separator();
-                                ui.spinner();
+                                crate::theme::spinner(ui, 14.0);
                                 ui.label(small("Saving…".into()));
                             }
                         }
@@ -754,7 +757,7 @@ impl BdfApp {
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if self.tiles.pending() > 0 || self.opening() > 0 {
-                            ui.add(egui::Spinner::new().size(12.0));
+                            crate::theme::spinner(ui, 14.0);
                         }
                         if let Some(t) = self.active_tab()
                             && let Some(d) = self.docs.get(&t.doc)
@@ -1013,11 +1016,10 @@ impl BdfApp {
                                     },
                                 ));
                                 if !s.done {
-                                    ui.add(egui::Spinner::new().size(12.0))
-                                        .on_hover_text(format!(
-                                            "Searched {} of {} pages",
-                                            s.searched, s.total
-                                        ));
+                                    crate::theme::spinner(ui, 14.0).on_hover_text(format!(
+                                        "Searched {} of {} pages",
+                                        s.searched, s.total
+                                    ));
                                 }
                             }
                             if ui
@@ -1068,7 +1070,7 @@ impl BdfApp {
             .show(&mut child, |ui| {
                 ui.set_width(card_w - 48.0);
                 ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(icon::PDF).size(44.0).color(pal.accent));
+                    crate::theme::logo(ui, 96.0);
                     ui.label(RichText::new("BDF").size(26.0).strong());
                     ui.label(RichText::new("Fast, portable PDF reader").weak());
                     ui.add_space(14.0);

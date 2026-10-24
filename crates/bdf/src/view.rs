@@ -78,11 +78,55 @@ impl Tool {
     }
 }
 
-/// A text selection from `(page, char)` to `(page, char)`, end exclusive.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TextSel {
-    pub start: (usize, usize),
-    pub end: (usize, usize),
+/// A text selection. A drag is kept as its two ends and resolved against the
+/// visible lines of each page (see `bdf_core::visual`), so hidden text and
+/// the file's own text order never decide what gets selected.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextSel {
+    /// From `a` to `b`: (page, user-space point). `words` snaps to whole words.
+    Drag {
+        a: (usize, (f32, f32)),
+        b: (usize, (f32, f32)),
+        words: bool,
+    },
+    /// Explicit characters on one page (a word, a line, the whole page).
+    Chars { page: usize, chars: Vec<usize> },
+}
+
+impl TextSel {
+    fn pages(&self) -> (usize, usize) {
+        match self {
+            TextSel::Drag { a, b, .. } => (a.0.min(b.0), a.0.max(b.0)),
+            TextSel::Chars { page, .. } => (*page, *page),
+        }
+    }
+}
+
+/// The characters a selection covers on one page, in reading order.
+pub fn selection_on_page(sel: &TextSel, page: usize, d: &PageData) -> Vec<usize> {
+    match sel {
+        TextSel::Chars { page: p, chars } => {
+            if *p == page {
+                chars.clone()
+            } else {
+                Vec::new()
+            }
+        }
+        TextSel::Drag { a, b, words } => {
+            let (s, e) = if a.0 <= b.0 { (a, b) } else { (b, a) };
+            if page < s.0 || page > e.0 {
+                Vec::new()
+            } else if s.0 == e.0 {
+                d.text.select_visual(s.1, e.1, *words)
+            } else if page == s.0 {
+                d.text.select_after(s.1)
+            } else if page == e.0 {
+                d.text.select_before(e.1)
+            } else {
+                d.text.select_all_visible()
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -933,21 +977,16 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
     }
 
     // ---- overlays: selection ----
-    if let Some(sel) = view.selection {
+    if let Some(sel) = &view.selection {
+        let (first, last) = sel.pages();
         for &p in &visible {
-            if p < sel.start.0 || p > sel.end.0 {
+            if p < first || p > last {
                 continue;
             }
             let (Some(d), Some(g)) = (datas.get(&p), geoms.get(&p)) else {
                 continue;
             };
-            let a = if p == sel.start.0 { sel.start.1 } else { 0 };
-            let b = if p == sel.end.0 {
-                sel.end.1
-            } else {
-                d.text.len()
-            };
-            for r in d.text.rects(a, b) {
+            for r in d.text.rects_for(&selection_on_page(sel, p, d)) {
                 if let Some(sr) = g.rect_to_screen(r) {
                     painter.rect_filled(sr, CornerRadius::same(1), pal.selection);
                 }
@@ -1128,13 +1167,13 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
                             .total_cmp(&geoms[b].screen.distance_sq_to_pos(p))
                     });
                     if let Some(fp) = focus
-                        && let (Some(u), Some(da), Some(df)) = (
-                            geoms[&fp].to_user(p),
-                            doc.peek_page_data(page as u32),
-                            datas.get(&fp),
-                        )
+                        && let Some(u) = geoms[&fp].to_user(p)
                     {
-                        view.selection = select_between(page, &da, at, fp, df, u);
+                        view.selection = Some(TextSel::Drag {
+                            a: (page, at),
+                            b: (fp, u),
+                            words: tool.markup_kind().is_some(),
+                        });
                     }
                     autoscroll(view, rect, p);
                 }
@@ -1158,7 +1197,7 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
     if response.drag_stopped() {
         match view.drag {
             Drag::Select { .. } => {
-                if let (Some(kind), Some(sel)) = (tool.markup_kind(), view.selection) {
+                if let (Some(kind), Some(sel)) = (tool.markup_kind(), view.selection.clone()) {
                     for (page, rects) in selection_rects(doc, &sel) {
                         actions.push(ViewAction::AddAnnot {
                             page,
@@ -1302,12 +1341,11 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
         ) && matches!(
             tool,
             Tool::Select | Tool::Highlight | Tool::Underline | Tool::StrikeOut
-        ) && let Some((a, b)) = d.text.char_near(u.0, u.1).and_then(|i| d.text.word_at(i))
-        {
-            view.selection = Some(TextSel {
-                start: (pg, a),
-                end: (pg, b),
-            });
+        ) {
+            let chars = d.text.word_at_point(u);
+            if !chars.is_empty() {
+                view.selection = Some(TextSel::Chars { page: pg, chars });
+            }
         }
     }
     if response.triple_clicked()
@@ -1316,12 +1354,11 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
             hover_user,
             hover_page.and_then(|p| datas.get(&p)),
         )
-        && let Some((a, b)) = d.text.char_near(u.0, u.1).and_then(|i| d.text.line_at(i))
     {
-        view.selection = Some(TextSel {
-            start: (pg, a),
-            end: (pg, b),
-        });
+        let chars = d.text.line_at_point(u);
+        if !chars.is_empty() {
+            view.selection = Some(TextSel::Chars { page: pg, chars });
+        }
     }
     if response.secondary_clicked() {
         view.context_at = hover_page.zip(hover_user);
@@ -1538,7 +1575,7 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
                     .button(format!("{}  {label}", crate::theme::icon::HIGHLIGHT))
                     .clicked()
                 {
-                    if let Some(sel) = view.selection {
+                    if let Some(sel) = view.selection.clone() {
                         for (page, rects) in selection_rects(doc, &sel) {
                             actions.push(ViewAction::AddAnnot {
                                 page,
@@ -1651,10 +1688,11 @@ pub fn markup_color(kind: AnnotKind, highlight: [u8; 3]) -> [u8; 3] {
     }
 }
 
+/// The pointer is on text a reader can see (hidden text does not count).
 fn over_text_at(datas: &HashMap<usize, Arc<PageData>>, page: usize, u: (f32, f32)) -> bool {
     datas.get(&page).is_some_and(|d| {
-        d.text.chars.iter().any(|c| {
-            c.rect.is_some_and(|r| {
+        d.text.selectable().into_iter().any(|i| {
+            d.text.chars[i].rect.is_some_and(|r| {
                 u.0 >= r[0] - 2.0 && u.0 <= r[2] + 2.0 && u.1 >= r[1] - 2.0 && u.1 <= r[3] + 2.0
             })
         })
@@ -1690,79 +1728,30 @@ fn autoscroll(view: &mut ViewState, rect: Rect, p: Pos2) {
     }
 }
 
-/// Selection between an anchor and the pointer, possibly across pages.
-fn select_between(
-    pa: usize,
-    da: &PageData,
-    ua: (f32, f32),
-    pf: usize,
-    df: &PageData,
-    uf: (f32, f32),
-) -> Option<TextSel> {
-    if pa == pf {
-        let (s, e) = da.text.select(ua, uf)?;
-        return Some(TextSel {
-            start: (pa, s),
-            end: (pa, e),
-        });
-    }
-    let ia = da.text.char_near(ua.0, ua.1)?;
-    let jf = df.text.char_near(uf.0, uf.1);
-    if pa < pf {
-        let end = jf.map(|j| j + 1).unwrap_or(0);
-        Some(TextSel {
-            start: (pa, ia),
-            end: (pf, end),
-        })
-    } else {
-        let start = jf.unwrap_or(0);
-        Some(TextSel {
-            start: (pf, start),
-            end: (pa, ia + 1),
-        })
-    }
-}
-
-/// Line rectangles of a selection, per page (user space).
+/// Highlight rectangles of a selection, per page (user space).
 pub fn selection_rects(doc: &DocState, sel: &TextSel) -> Vec<(u32, Vec<[f32; 4]>)> {
-    let mut out = Vec::new();
-    for p in sel.start.0..=sel.end.0 {
-        let Some(d) = doc.peek_page_data(p as u32) else {
-            continue;
-        };
-        let a = if p == sel.start.0 { sel.start.1 } else { 0 };
-        let b = if p == sel.end.0 {
-            sel.end.1
-        } else {
-            d.text.len()
-        };
-        let rects = d.text.rects(a, b);
-        if !rects.is_empty() {
-            out.push((p as u32, rects));
-        }
-    }
-    out
+    let (first, last) = sel.pages();
+    (first..=last)
+        .filter_map(|p| {
+            let d = doc.peek_page_data(p as u32)?;
+            let rects = d.text.rects_for(&selection_on_page(sel, p, &d));
+            (!rects.is_empty()).then_some((p as u32, rects))
+        })
+        .collect()
 }
 
+/// The selected text in reading order.
 pub fn selection_text(doc: &DocState, view: &ViewState) -> Option<String> {
-    let sel = view.selection?;
-    let mut s = String::new();
-    for p in sel.start.0..=sel.end.0 {
-        let Some(d) = doc.peek_page_data(p as u32) else {
-            continue;
-        };
-        let a = if p == sel.start.0 { sel.start.1 } else { 0 };
-        let b = if p == sel.end.0 {
-            sel.end.1
-        } else {
-            d.text.len()
-        };
-        if !s.is_empty() && !s.ends_with('\n') {
-            s.push('\n');
-        }
-        s.push_str(&d.text.slice(a, b));
-    }
-    (!s.is_empty()).then_some(s)
+    let sel = view.selection.as_ref()?;
+    let (first, last) = sel.pages();
+    let parts: Vec<String> = (first..=last)
+        .filter_map(|p| {
+            let d = doc.peek_page_data(p as u32)?;
+            let t = d.text.text_for(&selection_on_page(sel, p, &d));
+            (!t.is_empty()).then_some(t)
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 /// Ramer-Douglas-Peucker simplification of an ink stroke.

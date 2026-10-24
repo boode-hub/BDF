@@ -29,10 +29,10 @@ x mousemove 400 600 mousedown 1; x mousemove 480 640; x mousemove 560 600; x mou
 x mousemove $RECT click 1                            # a rectangle, then Edit > Undo
 x mousemove 700 500 mousedown 1; x mousemove 900 560; x mouseup 1
 sleep 0.5
-x mousemove 54 15 click 1; x mousemove 80 47 click 1
+x mousemove 78 15 click 1; x mousemove 104 47 click 1
 x mousemove $SELECT click 1; x mousemove 700 400
 shot ui-annotated
-x mousemove 20 15 click 1; x mousemove 51 124 click 1   # File > Save
+x mousemove 44 15 click 1; x mousemove 75 124 click 1   # File > Save
 sleep 3
 shot ui-saved
 
@@ -59,7 +59,7 @@ sleep 2
 x mousemove 475 352 click 1                          # the "I agree" checkbox
 sleep 1
 shot ui-form
-x mousemove 20 15 click 1; x mousemove 51 124 click 1   # File > Save
+x mousemove 44 15 click 1; x mousemove 75 124 click 1   # File > Save
 sleep 3
 if grep -aqE "/AS ?/Yes" "$work/form.pdf"; then echo "ok: checkbox value saved"; else echo "FAIL: checkbox value not saved"; fail=1; fi
 exit $fail

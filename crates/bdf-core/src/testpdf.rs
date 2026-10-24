@@ -17,6 +17,21 @@ pub struct PageSpec {
     /// `([l, b, r, t], [r, g, b])` filled rectangles.
     pub rects: Vec<([f32; 4], [f32; 3])>,
     pub links: Vec<([f32; 4], LinkSpec)>,
+    /// Text with a render mode (3 = invisible) and grey level (1 = white),
+    /// drawn after `text`.
+    pub styled: Vec<StyledText>,
+    /// Filled rectangles drawn last, on top of all text.
+    pub covers: Vec<([f32; 4], [f32; 3])>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StyledText {
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub text: String,
+    pub mode: i32,
+    pub gray: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -196,6 +211,31 @@ impl PdfSpec {
             }
             for (x, y, size, s) in &p.text {
                 let _ = writeln!(content, "BT /F1 {size} Tf {x} {y} Td ({}) Tj ET", escape(s));
+            }
+            for t in &p.styled {
+                let _ = writeln!(
+                    content,
+                    "BT {g} g /F1 {} Tf {} Tr {} {} Td ({}) Tj ET 0 g",
+                    t.size,
+                    t.mode,
+                    t.x,
+                    t.y,
+                    escape(&t.text),
+                    g = t.gray
+                );
+            }
+            for (r, c) in &p.covers {
+                let _ = writeln!(
+                    content,
+                    "{} {} {} rg {} {} {} {} re f",
+                    c[0],
+                    c[1],
+                    c[2],
+                    r[0],
+                    r[1],
+                    r[2] - r[0],
+                    r[3] - r[1]
+                );
             }
             let mut annots = Vec::new();
             for (r, l) in &p.links {
@@ -443,6 +483,56 @@ pub fn form_document() -> Vec<u8> {
             },
         ],
         title: Some("BDF form test".into()),
+        ..Default::default()
+    }
+    .build()
+}
+
+/// A page that trips naive selection: visible paragraphs with hidden text
+/// in between (covered by a white box, white on white, invisible mode, off
+/// the page), plus a second page that mimics a scan with an OCR layer.
+pub fn hidden_text_document() -> Vec<u8> {
+    let st = |x: f32, y: f32, text: &str, mode: i32, gray: f32| StyledText {
+        x,
+        y,
+        size: 12.0,
+        text: text.into(),
+        mode,
+        gray,
+    };
+    let mut p0 = PageSpec::letter()
+        .with_text(72.0, 700.0, 12.0, "Visible first line of the paragraph")
+        .with_text(72.0, 684.0, 12.0, "Visible second line of the paragraph");
+    // Hidden blocks, written to the file between the visible lines.
+    p0.styled
+        .push(st(72.0, 500.0, "COVERED SECRET BLOCK", 0, 0.0));
+    p0.styled
+        .push(st(72.0, 450.0, "WHITE ON WHITE BLOCK", 0, 1.0));
+    p0.styled
+        .push(st(72.0, 400.0, "INVISIBLE MODE BLOCK", 3, 0.0));
+    p0.styled.push(st(900.0, 300.0, "OFF PAGE BLOCK", 0, 0.0));
+    p0.covers
+        .push(([60.0, 490.0, 400.0, 520.0], [1.0, 1.0, 1.0]));
+    p0.text.push((
+        72.0,
+        668.0,
+        12.0,
+        "Visible third line of the paragraph".into(),
+    ));
+    // A "scan": a dark picture of text with an invisible OCR layer on top.
+    let mut p1 = PageSpec::letter();
+    p1.rects
+        .push(([60.0, 680.0, 500.0, 720.0], [0.92, 0.92, 0.9]));
+    // Letter-like dark strokes, as a scanner would capture them.
+    let mut x = 72.0;
+    while x < 260.0 {
+        p1.rects.push(([x, 693.0, x + 2.5, 704.0], [0.1, 0.1, 0.1]));
+        x += 3.5;
+    }
+    p1.styled
+        .push(st(72.0, 695.0, "Scanned words from OCR", 3, 0.0));
+    PdfSpec {
+        pages: vec![p0, p1],
         ..Default::default()
     }
     .build()

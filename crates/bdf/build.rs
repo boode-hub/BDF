@@ -1,5 +1,6 @@
 //! Embeds the icon and version information in the Windows executable.
 
+#[allow(dead_code)]
 #[path = "src/icon_pixels.rs"]
 mod icon_pixels;
 

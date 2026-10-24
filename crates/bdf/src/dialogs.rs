@@ -534,7 +534,7 @@ impl BdfApp {
                 modal.show(ctx, |ui| {
                     ui.set_width(420.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new(icon::PDF).size(40.0).color(theme::palette(ui.visuals().dark_mode).accent));
+                        theme::logo(ui, 72.0);
                         ui.heading(format!("BDF {}", env!("CARGO_PKG_VERSION")));
                         ui.label("A fast, portable PDF reader.");
                     });

@@ -33,6 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const FPDF_ANNOT: c_int = 0x01;
 const FPDF_REVERSE_BYTE_ORDER: c_int = 0x10;
 const FPDF_PRINTING: c_int = 0x800;
+const FPDF_GRAYSCALE: c_int = 0x08;
 const FPDF_ERR_FILE: c_ulong = 2;
 const FPDF_ERR_FORMAT: c_ulong = 3;
 const FPDF_ERR_PASSWORD: c_ulong = 4;
@@ -494,7 +495,9 @@ impl PdfiumEngine {
         }
     }
 
-    fn page_text_of(&mut self, id: DocId, index: u32) -> EResult<PageText> {
+    /// Extracts a page's text. With `check_visibility`, also marks the
+    /// characters that draw nothing a reader can see (see [`mark_hidden`]).
+    fn page_text_of(&mut self, id: DocId, index: u32, check_visibility: bool) -> EResult<PageText> {
         let page = self.page(id, index)?;
         let lib = &*self.lib;
         // SAFETY: valid page; text page closed below.
@@ -502,9 +505,12 @@ impl PdfiumEngine {
         if tp.is_null() {
             return Ok(PageText::default());
         }
-        let text = read_text(lib, tp);
+        let mut text = read_text(lib, tp);
         // SAFETY: handle from LoadPage.
         unsafe { lib.FPDFText_ClosePage(tp) };
+        if check_visibility && text.chars.iter().any(|c| c.rect.is_some()) {
+            mark_hidden(lib, page, &mut text);
+        }
         Ok(text)
     }
 }
@@ -622,7 +628,7 @@ impl Engine for PdfiumEngine {
     }
 
     fn page_data(&mut self, id: DocId, index: u32) -> EResult<PageData> {
-        let text = self.page_text_of(id, index)?;
+        let text = self.page_text_of(id, index, true)?;
         let page = self.page(id, index)?;
         let lib = &*self.lib;
         let doc = self.docs.get(&id).ok_or("document is not open")?;
@@ -655,7 +661,8 @@ impl Engine for PdfiumEngine {
     }
 
     fn page_text(&mut self, id: DocId, page: u32) -> EResult<PageText> {
-        self.page_text_of(id, page)
+        // Search reads every page; skip the visibility pass to stay fast.
+        self.page_text_of(id, page, false)
     }
 
     fn annotations(&mut self, id: DocId, index: u32) -> EResult<Vec<AnnotInfo>> {
@@ -1387,10 +1394,81 @@ fn read_text(lib: &dyn PdfiumLibraryBindings, tp: FPDF_TEXTPAGE) -> PageText {
             (ok && rr > l && t > b && [l, b, rr, t].iter().all(|v| v.is_finite()))
                 .then_some([l, b, rr, t])
         };
-        chars.push(TextChar { ch, rect });
+        chars.push(TextChar {
+            ch,
+            rect,
+            hidden: false,
+        });
         i += step;
     }
     PageText { chars }
+}
+
+/// Marks characters that put no ink on the page.
+///
+/// The page is rendered once in grey (without annotations or form fields)
+/// and every glyph box is checked for contrast. A glyph is hidden when its
+/// box is flat: invisible-mode text over a blank area, text covered by an
+/// image or a white box, white on white, clipped away, on a layer that is
+/// switched off, or off the page. OCR text over a scanned image stays
+/// visible because the scan supplies the ink.
+fn mark_hidden(lib: &dyn PdfiumLibraryBindings, page: FPDF_PAGE, text: &mut PageText) {
+    // SAFETY: valid page.
+    let (pw, ph) = unsafe { (lib.FPDF_GetPageWidthF(page), lib.FPDF_GetPageHeightF(page)) };
+    if !(pw > 0.0 && ph > 0.0) {
+        return;
+    }
+    // About 1.5 px per point, capped at ~3 megapixels for posters and maps.
+    let k = (1.5f32).min((3_000_000.0 / (pw * ph)).sqrt()).max(0.25);
+    let (w, h) = (
+        ((pw * k).round() as c_int).max(1),
+        ((ph * k).round() as c_int).max(1),
+    );
+    // SAFETY: sizes are positive and bounded; NULL is handled.
+    let bmp = unsafe { lib.FPDFBitmap_Create(w, h, 0) };
+    if bmp.is_null() {
+        return;
+    }
+    // SAFETY: valid bitmap and page; the buffer is read within its stride.
+    unsafe {
+        lib.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xFFFF_FFFF);
+        lib.FPDF_RenderPageBitmap(bmp, page, 0, 0, w, h, 0, FPDF_GRAYSCALE);
+        let buf = lib.FPDFBitmap_GetBuffer(bmp) as *const u8;
+        let stride = lib.FPDFBitmap_GetStride(bmp) as usize;
+        if !buf.is_null() && stride >= w as usize * 4 {
+            let pixels = std::slice::from_raw_parts(buf, stride * h as usize);
+            for c in text.chars.iter_mut() {
+                let Some(r) = c.rect else { continue };
+                let to_dev = |x: f32, y: f32| {
+                    let (mut dx, mut dy) = (0, 0);
+                    lib.FPDF_PageToDevice(
+                        page, 0, 0, w, h, 0, x as f64, y as f64, &mut dx, &mut dy,
+                    );
+                    (dx, dy)
+                };
+                // Shrink the box a little vertically so the line above or
+                // below does not lend its ink.
+                let inset = (r[3] - r[1]) * 0.12;
+                let (ax, ay) = to_dev(r[0], r[1] + inset);
+                let (bx, by) = to_dev(r[2], r[3] - inset);
+                let (x0, x1) = (ax.min(bx).clamp(0, w - 1), ax.max(bx).clamp(0, w - 1));
+                let (y0, y1) = (ay.min(by).clamp(0, h - 1), ay.max(by).clamp(0, h - 1));
+                let off_page =
+                    ax.max(bx) < 0 || ax.min(bx) >= w || ay.max(by) < 0 || ay.min(by) >= h;
+                let (mut lo, mut hi) = (255u8, 0u8);
+                for y in y0..=y1 {
+                    let row = &pixels[y as usize * stride..];
+                    for x in x0..=x1 {
+                        let v = row[x as usize * 4 + 1]; // grey: any channel
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+                c.hidden = off_page || hi.saturating_sub(lo) < 40;
+            }
+        }
+        lib.FPDFBitmap_Destroy(bmp);
+    }
 }
 
 fn dest_target(

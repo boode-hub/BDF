@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ThemePref {
-    #[default]
     System,
     Light,
+    #[default]
     Dark,
 }
 
@@ -84,7 +84,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: ThemePref::System,
+            theme: ThemePref::Dark,
             renderer: RendererPref::Auto,
             page_mode: PageMode::Continuous,
             cover_page: false,

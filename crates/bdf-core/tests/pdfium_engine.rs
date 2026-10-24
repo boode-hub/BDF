@@ -669,3 +669,60 @@ fn forms_can_be_filled_and_saved() {
     let again = e2.render(&thumb(DocId(7), 0)).unwrap();
     assert_ne!(before.rgba, again.rgba);
 }
+
+#[test]
+fn hidden_text_is_found_and_selection_ignores_it() {
+    let _serial = serial();
+    let Some(mut e) = engine() else { return };
+    let path = write("hidden.pdf", &bdf_core::testpdf::hidden_text_document());
+    let doc = DocId(1);
+    e.open(doc, &path, None).unwrap();
+    let d = e.page_data(doc, 0).unwrap();
+    let hidden_text: String = d
+        .text
+        .chars
+        .iter()
+        .filter(|c| c.hidden && c.rect.is_some())
+        .map(|c| c.ch)
+        .collect();
+    for block in ["COVERED", "WHITE", "INVISIBLE", "OFF"] {
+        assert!(
+            hidden_text.contains(block),
+            "{block} should be hidden: {hidden_text:?}"
+        );
+    }
+    assert!(
+        !hidden_text.contains("Visible"),
+        "visible text wrongly hidden: {hidden_text:?}"
+    );
+    // The old file-order selection from the first to the third visible line
+    // would pull in every hidden block; the visual one does not.
+    let first = d.text.search("Visible first", Default::default())[0];
+    let third = d.text.search("third line", Default::default())[0];
+    let a = d.text.chars[first.start].rect.unwrap();
+    let b = d.text.chars[third.end - 1].rect.unwrap();
+    let sel = d.text.select_visual(
+        (a[0] - 1.0, (a[1] + a[3]) / 2.0),
+        (b[2] + 1.0, (b[1] + b[3]) / 2.0),
+        true,
+    );
+    let got = d.text.text_for(&sel);
+    assert_eq!(
+        got,
+        "Visible first line of the paragraph\nVisible second line of the paragraph\nVisible third line"
+    );
+    assert_eq!(d.text.rects_for(&sel).len(), 3);
+    // The "scanned" page: the OCR layer sits on ink, so it stays selectable.
+    let d1 = e.page_data(doc, 1).unwrap();
+    assert!(
+        d1.text
+            .chars
+            .iter()
+            .filter(|c| c.rect.is_some())
+            .all(|c| !c.hidden)
+    );
+    assert_eq!(
+        d1.text.text_for(&d1.text.select_all_visible()),
+        "Scanned words from OCR"
+    );
+}

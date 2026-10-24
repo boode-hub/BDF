@@ -78,31 +78,34 @@ pub struct Palette {
     pub success: Color32,
 }
 
+/// The Sharingan palette: crimson on near-black (dark), crimson on warm
+/// paper (light).
 pub fn palette(dark: bool) -> Palette {
     if dark {
         Palette {
-            accent: Color32::from_rgb(96, 140, 255),
-            accent_soft: Color32::from_rgba_unmultiplied(96, 140, 255, 40),
-            canvas: Color32::from_rgb(30, 31, 34),
-            page_shadow: Color32::from_black_alpha(140),
-            selection: Color32::from_rgba_unmultiplied(70, 130, 255, 90),
-            search_hit: Color32::from_rgba_unmultiplied(255, 200, 0, 90),
-            search_current: Color32::from_rgba_unmultiplied(255, 120, 0, 140),
-            muted: Color32::from_gray(150),
-            danger: Color32::from_rgb(248, 113, 113),
+            accent: Color32::from_rgb(227, 34, 43),
+            accent_soft: Color32::from_rgba_unmultiplied(227, 34, 43, 42),
+            canvas: Color32::from_rgb(12, 11, 12),
+            // A faint red glow around pages instead of a grey shadow.
+            page_shadow: Color32::from_rgba_unmultiplied(150, 0, 8, 70),
+            selection: Color32::from_rgba_unmultiplied(227, 34, 43, 80),
+            search_hit: Color32::from_rgba_unmultiplied(255, 80, 70, 85),
+            search_current: Color32::from_rgba_unmultiplied(255, 35, 35, 150),
+            muted: Color32::from_gray(140),
+            danger: Color32::from_rgb(255, 77, 77),
             success: Color32::from_rgb(74, 222, 128),
         }
     } else {
         Palette {
-            accent: Color32::from_rgb(37, 99, 235),
-            accent_soft: Color32::from_rgba_unmultiplied(37, 99, 235, 28),
-            canvas: Color32::from_rgb(229, 231, 235),
-            page_shadow: Color32::from_black_alpha(60),
-            selection: Color32::from_rgba_unmultiplied(37, 99, 235, 70),
-            search_hit: Color32::from_rgba_unmultiplied(255, 200, 0, 110),
-            search_current: Color32::from_rgba_unmultiplied(255, 120, 0, 150),
+            accent: Color32::from_rgb(181, 18, 27),
+            accent_soft: Color32::from_rgba_unmultiplied(181, 18, 27, 30),
+            canvas: Color32::from_rgb(232, 225, 225),
+            page_shadow: Color32::from_rgba_unmultiplied(90, 0, 0, 55),
+            selection: Color32::from_rgba_unmultiplied(200, 20, 30, 60),
+            search_hit: Color32::from_rgba_unmultiplied(255, 80, 70, 90),
+            search_current: Color32::from_rgba_unmultiplied(220, 20, 30, 140),
             muted: Color32::from_gray(110),
-            danger: Color32::from_rgb(220, 38, 38),
+            danger: Color32::from_rgb(200, 20, 30),
             success: Color32::from_rgb(22, 163, 74),
         }
     }
@@ -156,17 +159,18 @@ fn visuals(dark: bool) -> Visuals {
     };
     let r6 = CornerRadius::same(6);
     if dark {
-        v.panel_fill = Color32::from_rgb(40, 42, 46);
-        v.window_fill = Color32::from_rgb(44, 46, 51);
-        v.extreme_bg_color = Color32::from_rgb(28, 29, 32);
-        v.faint_bg_color = Color32::from_rgb(48, 50, 55);
-        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_gray(60));
+        v.panel_fill = Color32::from_rgb(21, 19, 20);
+        v.window_fill = Color32::from_rgb(27, 24, 25);
+        v.extreme_bg_color = Color32::from_rgb(10, 9, 10);
+        v.faint_bg_color = Color32::from_rgb(31, 27, 28);
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 36, 38));
+        v.window_stroke = Stroke::new(1.0, Color32::from_rgb(90, 20, 26));
     } else {
-        v.panel_fill = Color32::from_rgb(250, 250, 251);
-        v.window_fill = Color32::WHITE;
+        v.panel_fill = Color32::from_rgb(251, 248, 248);
+        v.window_fill = Color32::from_rgb(255, 253, 253);
         v.extreme_bg_color = Color32::WHITE;
-        v.faint_bg_color = Color32::from_rgb(243, 244, 246);
-        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_gray(222));
+        v.faint_bg_color = Color32::from_rgb(245, 238, 238);
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(228, 214, 214));
     }
     v.selection.bg_fill = p.accent;
     v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
@@ -185,17 +189,22 @@ fn visuals(dark: bool) -> Visuals {
     // Flat buttons: no fill until hovered.
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.inactive.bg_stroke = Stroke::NONE;
+    // Hover and press tints lean red.
     v.widgets.hovered.weak_bg_fill = if dark {
-        Color32::from_gray(62)
+        Color32::from_rgb(52, 26, 29)
     } else {
-        Color32::from_gray(228)
+        Color32::from_rgb(243, 224, 225)
     };
     v.widgets.hovered.bg_stroke = Stroke::NONE;
     v.widgets.active.weak_bg_fill = if dark {
-        Color32::from_gray(72)
+        Color32::from_rgb(76, 28, 33)
     } else {
-        Color32::from_gray(214)
+        Color32::from_rgb(234, 205, 207)
     };
+    v.widgets.hovered.bg_fill = v.widgets.hovered.weak_bg_fill;
+    v.widgets.active.bg_fill = v.widgets.active.weak_bg_fill;
+    // Sliders, checkboxes and text cursors in crimson.
+    v.text_cursor.stroke = Stroke::new(2.0, p.accent);
     v.widgets.open.weak_bg_fill = v.widgets.hovered.weak_bg_fill;
     v
 }
@@ -207,5 +216,62 @@ pub fn window_icon() -> egui::IconData {
         rgba: crate::icon_pixels::icon_rgba(n),
         width: n as u32,
         height: n as u32,
+    }
+}
+
+fn image(n: usize, rgba: Vec<u8>) -> egui::ColorImage {
+    egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba)
+}
+
+fn art_id(name: &str) -> egui::Id {
+    egui::Id::unique(("bdf-art", name))
+}
+
+/// Uploads the Mangekyou logo and the tomoe spinner once.
+pub fn install_art(ctx: &egui::Context) {
+    let opts = egui::TextureOptions::LINEAR;
+    let logo = ctx.load_texture(
+        "bdf-logo",
+        image(256, crate::icon_pixels::icon_rgba(256)),
+        opts,
+    );
+    let tomoe = ctx.load_texture(
+        "bdf-tomoe",
+        image(96, crate::icon_pixels::tomoe_rgba(96)),
+        opts,
+    );
+    ctx.data_mut(|d| {
+        d.insert_temp(art_id("logo"), logo);
+        d.insert_temp(art_id("tomoe"), tomoe);
+    });
+}
+
+/// The Mangekyou logo at `size` points.
+pub fn logo(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    match ui
+        .ctx()
+        .data(|d| d.get_temp::<egui::TextureHandle>(art_id("logo")))
+    {
+        Some(t) => ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(size, size))),
+        None => ui.label(egui::RichText::new(icon::PDF).size(size)),
+    }
+}
+
+/// A spinning three-tomoe Sharingan, shown while work is in progress.
+pub fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    match ui
+        .ctx()
+        .data(|d| d.get_temp::<egui::TextureHandle>(art_id("tomoe")))
+    {
+        Some(t) => {
+            let angle = -(ui.input(|i| i.time) as f32) * 4.0;
+            ui.ctx().request_repaint();
+            ui.add(
+                egui::Image::new(&t)
+                    .fit_to_exact_size(egui::vec2(size, size))
+                    .rotate(angle, egui::vec2(0.5, 0.5)),
+            )
+        }
+        None => ui.add(egui::Spinner::new().size(size)),
     }
 }
