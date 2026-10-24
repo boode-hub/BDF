@@ -58,6 +58,9 @@ crates/bdf        the application (egui)
 How it stays fast:
 
 * PDFium runs on its own thread; the window never waits for it.
+* What is on screen is drawn first. Reading a page's text, links and the
+  hidden-text check waits until the visible pages have their images, then
+  the next screen and the sidebar thumbnails follow.
 * Pages are drawn as 1024-pixel tiles, and only the visible ones (plus one
   screen ahead) are rendered. Tiles that scroll away before they are drawn are
   dropped from the queue, so fast scrolling never builds a backlog.
@@ -84,6 +87,7 @@ target/release/bdf some.pdf
 ```sh
 BDF_PDFIUM=$PWD/.pdfium cargo test --workspace     # unit + real-PDFium tests
 target/release/bdf --bench --report bench.json      # scripted benchmark of the real app
+cargo run --release -p bdf-core --example timing -- file.pdf   # engine cost per step for page 1
 python3 scripts/check_bench.py bench.json           # fails if over budget
 scripts/ui_smoke.sh target/release/bdf              # Linux: real clicks via xdotool, checks the saved PDF
 ```

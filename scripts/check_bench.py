@@ -6,6 +6,7 @@ import sys
 # Budgets for a 2000-page document on a CI runner (no GPU, software rendering).
 LIMITS = {
     "open_ms": 4000,            # process start to document open
+    "first_image_ms": 5000,     # process start to the first page image on screen
     "first_render_ms": 6000,    # process start to first page fully drawn
     "scroll_frame_ms_p95": 40,  # UI work per frame while scrolling
     "frame_ms_p95": 60,         # UI work per frame across all phases

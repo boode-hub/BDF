@@ -28,6 +28,8 @@ pub struct Bench {
     phase_frames: Vec<f32>,
     scroll_frames: Vec<f32>,
     open_ms: Option<f64>,
+    /// Process start to the first page image on screen (the end of white pages).
+    first_image_ms: Option<f64>,
     first_render_ms: Option<f64>,
     search_ms: Option<f64>,
     search_hits: usize,
@@ -64,6 +66,7 @@ impl Bench {
             phase_frames: Vec::new(),
             scroll_frames: Vec::new(),
             open_ms: None,
+            first_image_ms: None,
             first_render_ms: None,
             search_ms: None,
             search_hits: 0,
@@ -98,6 +101,9 @@ impl Bench {
                 }
             }
             Phase::WaitFirstRender => {
+                if self.first_image_ms.is_none() && app.tiles.len() > 0 {
+                    self.first_image_ms = Some(ms(self.launched.elapsed()));
+                }
                 if app.tiles.len() > 0 && app.tiles.pending() == 0 {
                     self.first_render_ms = Some(ms(self.launched.elapsed()));
                     shot("1-first-page");
@@ -248,6 +254,7 @@ impl Bench {
             "file": self.file.display().to_string(),
             "pages": self.pages,
             "open_ms": self.open_ms,
+            "first_image_ms": self.first_image_ms,
             "first_render_ms": self.first_render_ms,
             "scroll_frames": self.scroll_frames.len(),
             "frame_ms_p50": pct(&all, 0.5),

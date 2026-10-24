@@ -11,7 +11,7 @@ use bdf_core::engine::{
 };
 use bdf_core::geom::{PageSpace, Rotation, page_px, quantize_scale};
 use bdf_core::layout::{Layout, LayoutParams, PageMode};
-use bdf_core::worker::{Request, WorkerHandle};
+use bdf_core::worker::{ON_SCREEN, Request, WorkerHandle};
 use eframe::egui::{
     self, Color32, CornerRadius, CursorIcon, Id, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui,
     Vec2, pos2, vec2,
@@ -924,7 +924,7 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
             generation: doc.generation(p as u32),
             kind: TileKind::Thumb,
         };
-        tiles.want(base, 1000);
+        tiles.want(base, ON_SCREEN);
         let size_rot = view.rotation.apply_size(doc.info.page_sizes[p]);
         let (nx, ny) = tile_grid(size_rot, q);
         if (nx as u32) * (ny as u32) <= 4 {
@@ -935,7 +935,7 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
                             kind: TileKind::Tile { scale: q, tx, ty },
                             ..base
                         },
-                        1100,
+                        ON_SCREEN + 100,
                     );
                 }
             }

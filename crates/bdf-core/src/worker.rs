@@ -6,11 +6,15 @@
 //! Scheduling, in order:
 //! 1. Control requests (open, close, save, annotation edits) in arrival order.
 //! 2. The latest magnifier region.
-//! 3. Page data (text, links, annotations) for visible pages.
-//! 4. Render requests by priority. The UI sends [`Request::Retain`] whenever
-//!    the set of tiles it wants changes; queued tiles outside that set are
-//!    dropped, so scrolling fast never leaves a backlog behind.
-//! 5. Search, one page per step, so it never holds up rendering.
+//! 3. Renders of what is on screen (priority below [`ON_SCREEN`]), so pages
+//!    never sit blank while their text is being read.
+//! 4. Page data (text, links, annotations, the hidden-text check) for visible
+//!    pages.
+//! 5. Other renders (the next screen, sidebar thumbnails) by priority. The UI
+//!    sends [`Request::Retain`] whenever the set of tiles it wants changes;
+//!    queued tiles outside that set are dropped, so scrolling fast never
+//!    leaves a backlog behind.
+//! 6. Search, one page per step, so it never holds up rendering.
 //!
 //! A panic inside a job is caught and reported; the thread keeps serving.
 
@@ -27,6 +31,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+/// Render priorities below this are for what is on screen now and run before
+/// page data; higher ones (prefetch, sidebar thumbnails) run after it.
+pub const ON_SCREEN: u32 = 1000;
 
 pub enum Request {
     /// `doc` comes from [`WorkerHandle::alloc_doc_id`].
@@ -654,6 +662,15 @@ impl Worker {
             }
             return;
         }
+        if self
+            .queue
+            .keys()
+            .next()
+            .is_some_and(|&(priority, _)| priority < ON_SCREEN)
+        {
+            self.render_next();
+            return;
+        }
         if let Some((doc, page)) = self.page_data.pop_front() {
             if self.open_docs.contains_key(&doc) {
                 let data = self
@@ -664,24 +681,30 @@ impl Worker {
             }
             return;
         }
-        if let Some((&slot, &key)) = self.queue.iter().next() {
-            self.queue.remove(&slot);
-            self.queued.remove(&key);
-            if self.open_docs.contains_key(&key.doc) {
-                let t0 = Instant::now();
-                let result = self.guarded(|e| e.render(&key)).and_then(|r| r);
-                self.stats
-                    .render_micros
-                    .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
-                self.stats.tiles_rendered.fetch_add(1, Ordering::Relaxed);
-                self.send(Response::Tile { key, result });
-            }
-            return;
-        }
-        if !self.searches.is_empty() {
+        if !self.queue.is_empty() {
+            self.render_next();
+        } else if !self.searches.is_empty() {
             self.search_step();
         } else {
             self.scan_step();
+        }
+    }
+
+    /// Renders the most urgent queued tile or thumbnail.
+    fn render_next(&mut self) {
+        let Some((&slot, &key)) = self.queue.iter().next() else {
+            return;
+        };
+        self.queue.remove(&slot);
+        self.queued.remove(&key);
+        if self.open_docs.contains_key(&key.doc) {
+            let t0 = Instant::now();
+            let result = self.guarded(|e| e.render(&key)).and_then(|r| r);
+            self.stats
+                .render_micros
+                .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+            self.stats.tiles_rendered.fetch_add(1, Ordering::Relaxed);
+            self.send(Response::Tile { key, result });
         }
     }
 
@@ -1204,20 +1227,27 @@ mod tests {
             opts: SearchOptions::default(),
             start_page: 0,
         });
+        // On-screen renders come first, then page data, then off-screen renders.
+        w.send(Request::Render {
+            key: key(doc, 4),
+            priority: ON_SCREEN,
+        });
+        w.send(Request::PageData { doc, page: 3 });
         w.send(Request::Render {
             key: key(doc, 3),
             priority: 0,
         });
-        w.send(Request::PageData { doc, page: 3 });
         gate.send(()).unwrap();
         loop {
-            if let Response::Tile { .. } = recv(&w) {
+            if let Response::Tile { key, .. } = recv(&w)
+                && key.page == 4
+            {
                 break;
             }
         }
         let l = log.lock().unwrap();
-        let first_two: Vec<&String> = l.iter().take(2).collect();
-        assert_eq!(first_two, vec!["data 3", "render 3"]);
+        let first: Vec<&String> = l.iter().take(3).collect();
+        assert_eq!(first, vec!["render 3", "data 3", "render 4"]);
         drop(l);
         w.send(Request::CancelSearch { doc });
     }
