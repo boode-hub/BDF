@@ -49,4 +49,17 @@ else
   echo "FAIL: original bytes changed"; fail=1
 fi
 if ! kill -0 $APP 2>/dev/null; then echo "FAIL: app exited"; cat "$work/app.log"; fail=1; fi
+kill $APP 2>/dev/null || true
+
+# Forms: tick a checkbox, save from the menu, check the saved value.
+"$BIN" --generate-form "$work/form.pdf"
+BDF_DATA_DIR="$work/data2" "$BIN" "$work/form.pdf" >"$work/app2.log" 2>&1 & APP=$!
+for _ in $(seq 1 50); do xdotool search --name "form.pdf" >/dev/null 2>&1 && break; sleep 0.2; done
+sleep 2
+x mousemove 475 352 click 1                          # the "I agree" checkbox
+sleep 1
+shot ui-form
+x mousemove 20 15 click 1; x mousemove 51 124 click 1   # File > Save
+sleep 3
+if grep -aqE "/AS ?/Yes" "$work/form.pdf"; then echo "ok: checkbox value saved"; else echo "FAIL: checkbox value not saved"; fail=1; fi
 exit $fail

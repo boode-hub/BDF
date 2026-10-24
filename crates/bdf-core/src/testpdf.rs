@@ -32,10 +32,24 @@ pub struct OutlineSpec {
     pub children: Vec<OutlineSpec>,
 }
 
+/// A field's object number, its spec, and a checkbox's on/off appearance objects.
+type FieldObjects<'a> = (usize, &'a FieldSpec, Option<(usize, usize)>);
+
+/// An AcroForm field.
+#[derive(Clone, Debug)]
+pub struct FieldSpec {
+    pub page: usize,
+    /// `[l, b, r, t]` in user space.
+    pub rect: [f32; 4],
+    pub name: String,
+    pub checkbox: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PdfSpec {
     pub pages: Vec<PageSpec>,
     pub outline: Vec<OutlineSpec>,
+    pub fields: Vec<FieldSpec>,
     pub title: Option<String>,
     pub author: Option<String>,
 }
@@ -108,7 +122,31 @@ impl PdfSpec {
         let outlines_root = 5 + 2 * n;
         let item_obj = |i: usize| outlines_root + 1 + i;
 
+        // Form fields follow the outline; a checkbox also has two appearance streams.
+        let first = outlines_root + if flat.is_empty() { 0 } else { 1 + flat.len() };
+        let field_objs: Vec<FieldObjects> = self
+            .fields
+            .iter()
+            .scan(first, |next, f| {
+                let obj = *next;
+                let ap = f.checkbox.then_some((obj + 1, obj + 2));
+                *next += if f.checkbox { 3 } else { 1 };
+                Some((obj, f, ap))
+            })
+            .collect();
+
         let mut catalog = String::from("<< /Type /Catalog /Pages 2 0 R");
+        if !field_objs.is_empty() {
+            let refs: Vec<String> = field_objs
+                .iter()
+                .map(|(o, _, _)| format!("{o} 0 R"))
+                .collect();
+            let _ = write!(
+                catalog,
+                " /AcroForm << /Fields [{}] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 3 0 R >> >> >>",
+                refs.join(" ")
+            );
+        }
         if !flat.is_empty() {
             let _ = write!(
                 catalog,
@@ -183,6 +221,11 @@ impl PdfSpec {
             if p.rotate != 0 {
                 let _ = write!(page, " /Rotate {}", p.rotate);
             }
+            for (o, f, _) in &field_objs {
+                if f.page == i {
+                    annots.push(format!("{o} 0 R"));
+                }
+            }
             if !annots.is_empty() {
                 let _ = write!(page, " /Annots [{}]", annots.join(" "));
             }
@@ -240,6 +283,43 @@ impl PdfSpec {
                 }
                 o.push_str(" >>");
                 objects.push((item_obj(idx), o));
+            }
+        }
+
+        for (o, f, ap) in &field_objs {
+            let r = f.rect;
+            let common = format!(
+                "/Type /Annot /Subtype /Widget /T ({}) /Rect [{} {} {} {}] /F 4 /P {} 0 R",
+                escape(&f.name),
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                page_obj(f.page)
+            );
+            match ap {
+                None => objects.push((
+                    *o,
+                    format!("<< {common} /FT /Tx /DA (/Helv 12 Tf 0 g) /MK << /BG [1 1 1] /BC [0 0 0] >> >>"),
+                )),
+                Some((on, off)) => {
+                    let (w, h) = (r[2] - r[0], r[3] - r[1]);
+                    objects.push((
+                        *o,
+                        format!("<< {common} /FT /Btn /V /Off /AS /Off /MK << /CA (4) >> /AP << /N << /Yes {on} 0 R /Off {off} 0 R >> >> >>"),
+                    ));
+                    let yes = format!("0 0 0 RG 1 w 0.5 0.5 {} {} re S 0 0 0 rg 3 3 {} {} re f", w - 1.0, h - 1.0, w - 6.0, h - 6.0);
+                    let no = format!("0 0 0 RG 1 w 0.5 0.5 {} {} re S", w - 1.0, h - 1.0);
+                    for (obj, body) in [(*on, yes), (*off, no)] {
+                        objects.push((
+                            obj,
+                            format!(
+                                "<< /Type /XObject /Subtype /Form /BBox [0 0 {w} {h}] /Length {} >>\nstream\n{body}\nendstream",
+                                body.len()
+                            ),
+                        ));
+                    }
+                }
             }
         }
 
@@ -338,6 +418,34 @@ pub fn long_document(pages: usize) -> Vec<u8> {
         }
     }
     spec.build()
+}
+
+/// A one-page form: a text field ("name") and a checkbox ("agree").
+pub fn form_document() -> Vec<u8> {
+    PdfSpec {
+        pages: vec![
+            PageSpec::letter()
+                .with_text(72.0, 700.0, 14.0, "Name:")
+                .with_text(160.0, 645.0, 14.0, "I agree"),
+        ],
+        fields: vec![
+            FieldSpec {
+                page: 0,
+                rect: [130.0, 690.0, 400.0, 715.0],
+                name: "name".into(),
+                checkbox: false,
+            },
+            FieldSpec {
+                page: 0,
+                rect: [130.0, 640.0, 148.0, 658.0],
+                name: "agree".into(),
+                checkbox: true,
+            },
+        ],
+        title: Some("BDF form test".into()),
+        ..Default::default()
+    }
+    .build()
 }
 
 #[cfg(test)]

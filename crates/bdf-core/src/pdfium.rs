@@ -10,8 +10,9 @@
 //! path; documents own their pages, and pages are closed before documents.
 
 use crate::engine::{
-    AnnotInfo, AnnotKind, DocId, DocInfo, EResult, Engine, Image, Link, LinkTarget, NewAnnot,
-    OpenError, OutlineItem, PageData, RegionReq, TileKey, TileKind, thumb_px,
+    AnnotInfo, AnnotKind, DocId, DocInfo, EResult, Engine, FieldKind, FormField, FormInput,
+    FormOutcome, Image, Link, LinkTarget, NewAnnot, OpenError, OutlineItem, PageData, RegionReq,
+    TileKey, TileKind, thumb_px,
 };
 use crate::geom::{Rotation, page_px};
 use crate::text::{PageText, TextChar};
@@ -102,7 +103,7 @@ struct Doc {
     handle: FPDF_DOCUMENT,
     form: FPDF_FORMHANDLE,
     // PDFium keeps pointers to these; they are boxed so they never move.
-    _form_info: Option<Box<FPDF_FORMFILLINFO>>,
+    form_info: Option<Box<FormInfo>>,
     access: Box<Access>,
     path: PathBuf,
     password: Option<String>,
@@ -284,10 +285,23 @@ impl PdfiumEngine {
         let (form, form_info) = if has_form {
             // SAFETY: an all-zero FPDF_FORMFILLINFO (null callbacks) is valid
             // input; PDFium checks each callback before use.
-            let mut info: Box<FPDF_FORMFILLINFO> = Box::new(unsafe { std::mem::zeroed() });
-            info.version = 1;
+            let mut info = Box::new(FormInfo {
+                info: unsafe { std::mem::zeroed() },
+                changed: false,
+            });
+            info.info.version = 1;
+            info.info.FFI_OnChange = Some(on_form_change);
             // SAFETY: `info` is boxed and kept alive in Doc until the form exits.
-            let form = unsafe { lib.FPDFDOC_InitFormFillEnvironment(handle, &mut *info) };
+            let form = unsafe { lib.FPDFDOC_InitFormFillEnvironment(handle, &mut info.info) };
+            if !form.is_null() {
+                // Tint fillable fields light blue, like other readers do.
+                // SAFETY: valid form handle; 0 means every field type.
+                unsafe {
+                    // PDFium reads this as 0x00BBGGRR: a light blue.
+                    lib.FPDF_SetFormFieldHighlightColor(form, 0, 0x00FF_DCD0);
+                    lib.FPDF_SetFormFieldHighlightAlpha(form, 90);
+                }
+            }
             (form, Some(info))
         } else {
             (null_mut(), None)
@@ -295,7 +309,7 @@ impl PdfiumEngine {
         Ok(Doc {
             handle,
             form,
-            _form_info: form_info,
+            form_info,
             access,
             path: path.to_path_buf(),
             password: password.map(str::to_string),
@@ -629,12 +643,14 @@ impl Engine for PdfiumEngine {
         let rotation = Rotation::from_quarters(unsafe { lib.FPDFPage_GetRotation(page) });
         let links = read_links(lib, doc.handle, page);
         let annots = read_annots(lib, page);
+        let fields = read_fields(lib, doc.form, page);
         Ok(PageData {
             bbox,
             rotation,
             text,
             links,
             annots,
+            fields,
         })
     }
 
@@ -857,9 +873,58 @@ impl Engine for PdfiumEngine {
         r
     }
 
+    fn form_input(&mut self, id: DocId, index: u32, input: &FormInput) -> EResult<FormOutcome> {
+        let page = self.page(id, index)?;
+        let lib = &*self.lib;
+        let doc = self.docs.get_mut(&id).ok_or("document is not open")?;
+        let form = doc.form;
+        let Some(info) = doc.form_info.as_mut().filter(|_| !form.is_null()) else {
+            return Ok(FormOutcome::default());
+        };
+        info.changed = false;
+        let mods = |shift: bool, ctrl: bool| (shift as c_int) | ((ctrl as c_int) << 1);
+        // SAFETY: page and form belong to the same open document.
+        let handled = unsafe {
+            match *input {
+                FormInput::Down { x, y } => {
+                    lib.FORM_OnMouseMove(form, page, 0, x as f64, y as f64);
+                    lib.FORM_OnLButtonDown(form, page, 0, x as f64, y as f64)
+                }
+                FormInput::Up { x, y } => lib.FORM_OnLButtonUp(form, page, 0, x as f64, y as f64),
+                FormInput::DoubleClick { x, y } => {
+                    lib.FORM_OnLButtonDoubleClick(form, page, 0, x as f64, y as f64)
+                }
+                FormInput::Key { code, shift, ctrl } => {
+                    lib.FORM_OnKeyDown(form, page, code, mods(shift, ctrl))
+                }
+                FormInput::Char(c) => lib.FORM_OnChar(form, page, c as c_int, 0),
+                FormInput::KillFocus => lib.FORM_ForceToKillFocus(form),
+            }
+        } != 0;
+        let mut page_index: c_int = -1;
+        let mut annot: FPDF_ANNOTATION = null_mut();
+        // SAFETY: out pointers are valid; a returned annotation is closed right away.
+        let focused = unsafe { lib.FORM_GetFocusedAnnot(form, &mut page_index, &mut annot) } != 0
+            && !annot.is_null();
+        if !annot.is_null() {
+            // SAFETY: handle returned by FORM_GetFocusedAnnot.
+            unsafe { lib.FPDFPage_CloseAnnot(annot) };
+        }
+        Ok(FormOutcome {
+            handled,
+            focused,
+            changed: info.changed,
+        })
+    }
+
     fn save(&mut self, id: DocId, target: &Path) -> EResult<()> {
         let lib = &*self.lib;
         let doc = self.docs.get(&id).ok_or("document is not open")?;
+        if !doc.form.is_null() {
+            // Commit a field that is still being edited.
+            // SAFETY: valid form handle.
+            unsafe { lib.FORM_ForceToKillFocus(doc.form) };
+        }
         let dir = target
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -1154,6 +1219,24 @@ unsafe extern "C" fn get_block(
 }
 
 // ---------------------------------------------------------------------------
+// Form filling.
+
+#[repr(C)]
+struct FormInfo {
+    // Must stay the first field: PDFium gets a pointer to it.
+    info: FPDF_FORMFILLINFO,
+    /// Set by PDFium whenever a field value changes.
+    changed: bool,
+}
+
+unsafe extern "C" fn on_form_change(this: *mut FPDF_FORMFILLINFO) {
+    if !this.is_null() {
+        // SAFETY: `this` is the first field of a live, boxed FormInfo.
+        unsafe { (*(this as *mut FormInfo)).changed = true };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // File writing for saves.
 
 #[repr(C)]
@@ -1405,6 +1488,58 @@ fn read_links(lib: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT, page: FPDF_PA
         if let Some(target) = target {
             out.push(Link { rect, target });
         }
+    }
+    out
+}
+
+fn read_fields(
+    lib: &dyn PdfiumLibraryBindings,
+    form: FPDF_FORMHANDLE,
+    page: FPDF_PAGE,
+) -> Vec<FormField> {
+    let mut out = Vec::new();
+    if form.is_null() {
+        return out;
+    }
+    // SAFETY: valid page and form; each annotation is closed after reading.
+    let count = unsafe { lib.FPDFPage_GetAnnotCount(page) };
+    for i in 0..count.min(10_000) {
+        let a = unsafe { lib.FPDFPage_GetAnnot(page, i) };
+        if a.is_null() {
+            continue;
+        }
+        if unsafe { lib.FPDFAnnot_GetSubtype(a) } == ANNOT_WIDGET {
+            let mut r = FS_RECTF {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            };
+            if unsafe { lib.FPDFAnnot_GetRect(a, &mut r) } != 0 {
+                let kind = match unsafe { lib.FPDFAnnot_GetFormFieldType(form, a) } {
+                    1 => FieldKind::PushButton,
+                    2 => FieldKind::CheckBox,
+                    3 => FieldKind::RadioButton,
+                    4 => FieldKind::ComboBox,
+                    5 => FieldKind::ListBox,
+                    6 => FieldKind::Text,
+                    7 => FieldKind::Signature,
+                    _ => FieldKind::Unknown,
+                };
+                let read_only = unsafe { lib.FPDFAnnot_GetFormFieldFlags(form, a) } & 1 != 0;
+                out.push(FormField {
+                    rect: [
+                        r.left.min(r.right),
+                        r.bottom.min(r.top),
+                        r.left.max(r.right),
+                        r.bottom.max(r.top),
+                    ],
+                    kind,
+                    read_only,
+                });
+            }
+        }
+        unsafe { lib.FPDFPage_CloseAnnot(a) };
     }
     out
 }

@@ -85,6 +85,7 @@ fn sample() -> Vec<u8> {
         ],
         title: Some("Sample title".into()),
         author: Some("Tester".into()),
+        fields: vec![],
     }
     .build()
 }
@@ -603,4 +604,68 @@ fn large_documents_open_fast_and_memory_stays_bounded() {
     // Generous limits for slow CI machines; typical numbers are far lower.
     assert!(open_ms < 3000, "open took {open_ms} ms");
     assert!(render_ms < 1000, "render took {render_ms} ms");
+}
+
+#[test]
+fn forms_can_be_filled_and_saved() {
+    use bdf_core::engine::{FieldKind, FormInput};
+    let _serial = serial();
+    let Some(mut e) = engine() else { return };
+    let path = write("form.pdf", &bdf_core::testpdf::form_document());
+    let doc = DocId(1);
+    let info = e.open(doc, &path, None).unwrap();
+    assert!(info.form_fields);
+    let d = e.page_data(doc, 0).unwrap();
+    assert_eq!(d.fields.len(), 2, "{:?}", d.fields);
+    assert!(d.fields.iter().any(|f| f.kind == FieldKind::Text));
+    assert!(d.fields.iter().any(|f| f.kind == FieldKind::CheckBox));
+
+    // Click into the text field and type.
+    let before = e.render(&thumb(doc, 0)).unwrap();
+    let out = e
+        .form_input(doc, 0, &FormInput::Down { x: 200.0, y: 700.0 })
+        .unwrap();
+    assert!(out.handled);
+    let out = e
+        .form_input(doc, 0, &FormInput::Up { x: 200.0, y: 700.0 })
+        .unwrap();
+    assert!(out.focused, "text field should take focus");
+    for c in "Ada Lovelace".encode_utf16() {
+        e.form_input(doc, 0, &FormInput::Char(c)).unwrap();
+    }
+    // PDFium takes Backspace as a character (as Windows sends it), not a key press.
+    let out = e.form_input(doc, 0, &FormInput::Char(0x08)).unwrap();
+    assert!(out.focused);
+    let out = e.form_input(doc, 0, &FormInput::KillFocus).unwrap();
+    assert!(out.changed, "committing the text changes the field");
+    assert!(!out.focused);
+
+    // Tick the checkbox.
+    e.form_input(doc, 0, &FormInput::Down { x: 139.0, y: 649.0 })
+        .unwrap();
+    let out = e
+        .form_input(doc, 0, &FormInput::Up { x: 139.0, y: 649.0 })
+        .unwrap();
+    assert!(out.changed, "clicking the checkbox changes it");
+    let after = e.render(&thumb(doc, 0)).unwrap();
+    assert_ne!(before.rgba, after.rgba, "filled fields render");
+
+    e.save(doc, &path).unwrap();
+    let saved = std::fs::read(&path).unwrap();
+    let text = String::from_utf8_lossy(&saved);
+    // Backspace removed one char: "Ada Lovelac".
+    assert!(
+        text.contains("Ada Lovelac") && !text.contains("Ada Lovelace)"),
+        "value saved"
+    );
+    assert!(
+        text.contains("/AS /Yes") || text.contains("/AS/Yes"),
+        "checkbox state saved"
+    );
+
+    // A fresh engine renders the saved values.
+    let mut e2 = engine().unwrap();
+    e2.open(DocId(7), &path, None).unwrap();
+    let again = e2.render(&thumb(DocId(7), 0)).unwrap();
+    assert_ne!(before.rgba, again.rgba);
 }

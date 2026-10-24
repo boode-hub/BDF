@@ -213,6 +213,80 @@ pub struct AnnotInfo {
     pub color: Option<[u8; 3]>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FieldKind {
+    Text,
+    CheckBox,
+    RadioButton,
+    ComboBox,
+    ListBox,
+    PushButton,
+    Signature,
+    Unknown,
+}
+
+/// An interactive form field (widget) on a page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormField {
+    /// User space `[left, bottom, right, top]`.
+    pub rect: [f32; 4],
+    pub kind: FieldKind,
+    pub read_only: bool,
+}
+
+/// Input forwarded to PDFium's form filler. Coordinates are user space.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FormInput {
+    Down {
+        x: f32,
+        y: f32,
+    },
+    Up {
+        x: f32,
+        y: f32,
+    },
+    DoubleClick {
+        x: f32,
+        y: f32,
+    },
+    /// A Windows virtual-key code (PDFium uses them on every platform).
+    Key {
+        code: i32,
+        shift: bool,
+        ctrl: bool,
+    },
+    /// One UTF-16 code unit of typed text.
+    Char(u16),
+    /// Commit and leave the focused field.
+    KillFocus,
+}
+
+/// Windows virtual-key codes understood by PDFium's form filler.
+pub mod vkey {
+    pub const BACK: i32 = 0x08;
+    pub const TAB: i32 = 0x09;
+    pub const RETURN: i32 = 0x0D;
+    pub const ESCAPE: i32 = 0x1B;
+    pub const END: i32 = 0x23;
+    pub const HOME: i32 = 0x24;
+    pub const LEFT: i32 = 0x25;
+    pub const UP: i32 = 0x26;
+    pub const RIGHT: i32 = 0x27;
+    pub const DOWN: i32 = 0x28;
+    pub const DELETE: i32 = 0x2E;
+    pub const A: i32 = 0x41;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FormOutcome {
+    /// PDFium acted on the input (the page must be redrawn).
+    pub handled: bool,
+    /// A field has keyboard focus afterwards.
+    pub focused: bool,
+    /// A field value changed (the document needs saving).
+    pub changed: bool,
+}
+
 /// Everything the UI needs about one page beyond pixels.
 #[derive(Clone, Debug, Default)]
 pub struct PageData {
@@ -223,6 +297,7 @@ pub struct PageData {
     pub text: PageText,
     pub links: Vec<Link>,
     pub annots: Vec<AnnotInfo>,
+    pub fields: Vec<FormField>,
 }
 
 /// An annotation to add. Geometry is in user space.
@@ -325,6 +400,8 @@ pub trait Engine {
         name: Option<&str>,
         text: &str,
     ) -> EResult<()>;
+    /// Forwards mouse or keyboard input to the form filler.
+    fn form_input(&mut self, id: DocId, page: u32, input: &FormInput) -> EResult<FormOutcome>;
     /// Saves to `target` (which may be the open file) and keeps the document open.
     fn save(&mut self, id: DocId, target: &Path) -> EResult<()>;
 }

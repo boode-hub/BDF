@@ -6,8 +6,8 @@ use crate::doc::DocState;
 use crate::theme::Palette;
 use crate::tiles::TileCache;
 use bdf_core::engine::{
-    AnnotInfo, AnnotKind, LinkTarget, NewAnnot, PageData, RegionReq, TILE, TileKey, TileKind,
-    tile_grid,
+    AnnotInfo, AnnotKind, FieldKind, FormInput, LinkTarget, NewAnnot, PageData, RegionReq, TILE,
+    TileKey, TileKind, tile_grid,
 };
 use bdf_core::geom::{PageSpace, Rotation, page_px, quantize_scale};
 use bdf_core::layout::{Layout, LayoutParams, PageMode};
@@ -105,13 +105,32 @@ enum Drag {
 }
 
 pub enum ViewAction {
-    AddAnnot { page: u32, annot: NewAnnot },
-    RemoveAnnot { page: u32, info: AnnotInfo },
-    EditAnnot { page: u32, info: AnnotInfo },
-    NewNote { page: u32, at: (f32, f32) },
+    AddAnnot {
+        page: u32,
+        annot: NewAnnot,
+    },
+    RemoveAnnot {
+        page: u32,
+        info: AnnotInfo,
+    },
+    EditAnnot {
+        page: u32,
+        info: AnnotInfo,
+    },
+    NewNote {
+        page: u32,
+        at: (f32, f32),
+    },
     OpenUri(String),
     Copy(String),
-    AddBookmark { page: u32 },
+    AddBookmark {
+        page: u32,
+    },
+    /// Mouse or keyboard input for a form field.
+    Form {
+        page: u32,
+        input: FormInput,
+    },
 }
 
 pub struct ViewState {
@@ -142,6 +161,8 @@ pub struct ViewState {
     last_region: Option<RegionReq>,
     /// Set by the app for synchronised scrolling: (page, fraction down the page).
     pub sync_to: Option<(usize, f32)>,
+    /// Page whose form field has keyboard focus.
+    pub form_focus: Option<usize>,
 }
 
 impl ViewState {
@@ -173,6 +194,7 @@ impl ViewState {
             context_at: None,
             last_region: None,
             sync_to: None,
+            form_focus: None,
         }
     }
 
@@ -753,7 +775,7 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
         };
         // Priority: thumbnails first (instant preview), then tiles nearest the middle.
         let dist = ((screen.center().y - center_y).abs() / 100.0) as u32;
-        let thumb = tiles.want(base, dist.min(9));
+        let thumb = tiles.want(base, dist.min(9)).or_else(|| older(tiles, base));
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         if let Some(t) = &thumb {
             painter.image(t.id(), screen, uv, Color32::WHITE);
@@ -810,7 +832,14 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
                 let d = ((tr.center().y - center_y).abs() / 100.0) as u32;
                 match tiles.want(key, 10 + d) {
                     Some(t) => fresh.push((t, tr)),
-                    None => all_ready = false,
+                    None => {
+                        all_ready = false;
+                        // After an edit, keep showing the previous image until
+                        // the new one arrives, so typing in a form never flickers.
+                        if let Some(t) = older(tiles, key) {
+                            fresh.push((t, tr));
+                        }
+                    }
                 }
             }
         }
@@ -950,9 +979,21 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
     let mut hover_link: Option<LinkTarget> = None;
     let mut hover_annot: Option<AnnotInfo> = None;
     let mut over_text = false;
+    let mut hover_field: Option<FieldKind> = None;
     if let (Some(pg), Some((ux, uy))) = (hover_page, hover_user)
         && let Some(d) = datas.get(&pg)
     {
+        hover_field = d
+            .fields
+            .iter()
+            .find(|f| {
+                !f.read_only
+                    && ux >= f.rect[0]
+                    && ux <= f.rect[2]
+                    && uy >= f.rect[1]
+                    && uy <= f.rect[3]
+            })
+            .map(|f| f.kind);
         hover_link = d
             .links
             .iter()
@@ -1029,6 +1070,8 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
             let middle = ctx.input(|i| i.pointer.middle_down());
             match (tool, pg, user) {
                 _ if middle => Drag::Pan,
+                // Presses on a form field belong to the field.
+                (Tool::Select | Tool::Hand, _, _) if hover_field.is_some() => Drag::None,
                 (Tool::Hand | Tool::Magnifier, _, _) => Drag::Pan,
                 (Tool::Select, Some(p), Some(u)) if over_text_at(&datas, p, u) => {
                     Drag::Select { page: p, at: u }
@@ -1203,8 +1246,28 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
                     let shift = ctx.input(|i| i.modifiers.shift);
                     view.zoom_step(if shift { -1 } else { 1 }, Some(p - rect.min));
                 }
+                Tool::Select | Tool::Hand if hover_field.is_some() => {
+                    if let (Some(pg), Some((x, y))) = (hover_page, hover_user) {
+                        view.selection = None;
+                        actions.push(ViewAction::Form {
+                            page: pg as u32,
+                            input: FormInput::Down { x, y },
+                        });
+                        actions.push(ViewAction::Form {
+                            page: pg as u32,
+                            input: FormInput::Up { x, y },
+                        });
+                    }
+                }
                 _ => {
                     view.selection = None;
+                    if let Some(fp) = view.form_focus.take() {
+                        // Clicking outside the field commits it.
+                        actions.push(ViewAction::Form {
+                            page: fp as u32,
+                            input: FormInput::KillFocus,
+                        });
+                    }
                     if let Some(a) = &hover_annot {
                         view.selected_annot = Some((hover_page.unwrap_or(0) as u32, a.clone()));
                     } else {
@@ -1218,7 +1281,16 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
         }
     }
     if response.double_clicked() {
-        if let (Some(a), Some(pg)) = (&hover_annot, hover_page) {
+        if let (true, Some(pg), Some((x, y))) = (
+            hover_field.is_some() && matches!(tool, Tool::Select | Tool::Hand),
+            hover_page,
+            hover_user,
+        ) {
+            actions.push(ViewAction::Form {
+                page: pg as u32,
+                input: FormInput::DoubleClick { x, y },
+            });
+        } else if let (Some(a), Some(pg)) = (&hover_annot, hover_page) {
             actions.push(ViewAction::EditAnnot {
                 page: pg as u32,
                 info: a.clone(),
@@ -1265,7 +1337,12 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
         let icon = match (tool, view.drag) {
             (_, Drag::Pan) => CursorIcon::Grabbing,
             _ if on_bar => CursorIcon::Default,
-            (Tool::Select | Tool::Hand, _) if hover_link.is_some() || hover_annot.is_some() => {
+            (Tool::Select | Tool::Hand, _) if hover_field == Some(FieldKind::Text) => {
+                CursorIcon::Text
+            }
+            (Tool::Select | Tool::Hand, _)
+                if hover_field.is_some() || hover_link.is_some() || hover_annot.is_some() =>
+            {
                 CursorIcon::PointingHand
             }
             (Tool::Select, _) if over_text => CursorIcon::Text,
@@ -1551,6 +1628,18 @@ pub fn show(ui: &mut Ui, rect: Rect, cx: ViewCtx<'_>) -> ViewOutput {
 
     let _ = active;
     out
+}
+
+/// The same image from up to three edits ago, if still cached.
+fn older(tiles: &mut TileCache, key: TileKey) -> Option<egui::TextureHandle> {
+    (1..=3u32)
+        .filter_map(|d| key.generation.checked_sub(d))
+        .find_map(|g| {
+            tiles.cached(&TileKey {
+                generation: g,
+                ..key
+            })
+        })
 }
 
 pub fn markup_color(kind: AnnotKind, highlight: [u8; 3]) -> [u8; 3] {

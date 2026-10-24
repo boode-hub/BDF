@@ -15,7 +15,8 @@
 //! A panic inside a job is caught and reported; the thread keeps serving.
 
 use crate::engine::{
-    AnnotInfo, DocId, DocInfo, Engine, Image, NewAnnot, OpenError, PageData, RegionReq, TileKey,
+    AnnotInfo, DocId, DocInfo, Engine, FormInput, FormOutcome, Image, NewAnnot, OpenError,
+    PageData, RegionReq, TileKey,
 };
 use crate::text::{Match, SearchOptions};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -93,6 +94,12 @@ pub enum Request {
         target: PathBuf,
         ticket: u64,
     },
+    FormInput {
+        doc: DocId,
+        page: u32,
+        input: FormInput,
+        ticket: u64,
+    },
     /// Run a closure on the engine thread (printing, export).
     Job {
         job: EngineJob,
@@ -159,6 +166,12 @@ pub enum Response {
         ticket: u64,
         target: PathBuf,
         result: Result<(), String>,
+    },
+    FormDone {
+        doc: DocId,
+        page: u32,
+        ticket: u64,
+        result: Result<FormOutcome, String>,
     },
     /// The engine thread hit an unexpected panic in a job and recovered.
     Fault(String),
@@ -320,6 +333,12 @@ enum Control {
     Save {
         doc: DocId,
         target: PathBuf,
+        ticket: u64,
+    },
+    FormInput {
+        doc: DocId,
+        page: u32,
+        input: FormInput,
         ticket: u64,
     },
     Job {
@@ -561,6 +580,17 @@ impl Worker {
                 target,
                 ticket,
             }),
+            Request::FormInput {
+                doc,
+                page,
+                input,
+                ticket,
+            } => self.control.push_back(Control::FormInput {
+                doc,
+                page,
+                input,
+                ticket,
+            }),
             Request::Job { job } => self.control.push_back(Control::Job { job }),
             Request::Shutdown => self.shutdown = true,
         }
@@ -780,6 +810,22 @@ impl Worker {
                     result,
                 });
             }
+            Control::FormInput {
+                doc,
+                page,
+                input,
+                ticket,
+            } => {
+                let result = self
+                    .guarded(|e| e.form_input(doc, page, &input))
+                    .and_then(|r| r);
+                self.send(Response::FormDone {
+                    doc,
+                    page,
+                    ticket,
+                    result,
+                });
+            }
             Control::Job { job } => {
                 let _ = self.guarded(|e| job(e));
             }
@@ -965,6 +1011,9 @@ mod tests {
         }
         fn save(&mut self, _: DocId, _: &Path) -> EResult<()> {
             Ok(())
+        }
+        fn form_input(&mut self, _: DocId, _: u32, _: &FormInput) -> EResult<FormOutcome> {
+            Ok(FormOutcome::default())
         }
     }
 

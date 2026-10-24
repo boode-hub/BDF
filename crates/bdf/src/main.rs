@@ -34,6 +34,8 @@ Options:
       --bench [file]     Run the built-in benchmark (generates a test file if none given)
       --report path      Where --bench writes its JSON report (default bdf-bench.json)
       --generate N path  Write an N-page test PDF and exit
+      --generate-form path
+                         Write a one-page test form and exit
       --list-annotations file
                          Print the annotations PDFium sees in a file and exit
   -h, --help             Show this help
@@ -49,6 +51,7 @@ struct Args {
     report: Option<PathBuf>,
     generate: Option<(usize, PathBuf)>,
     list_annotations: Option<PathBuf>,
+    generate_form: Option<PathBuf>,
     help: bool,
     version: bool,
 }
@@ -90,6 +93,9 @@ fn parse_args() -> Result<Args, String> {
                 a.list_annotations =
                     Some(it.next().ok_or("--list-annotations needs a file")?.into())
             }
+            "--generate-form" => {
+                a.generate_form = Some(it.next().ok_or("--generate-form needs a path")?.into())
+            }
             "--report" => a.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--generate" => {
                 let n = it.next().ok_or("--generate needs a page count")?;
@@ -122,6 +128,7 @@ fn main() -> ExitCode {
         || args.generate.is_some()
         || args.bench.is_some()
         || args.list_annotations.is_some()
+        || args.generate_form.is_some()
     {
         platform::attach_console();
     }
@@ -143,6 +150,15 @@ fn main() -> ExitCode {
         };
     }
 
+    if let Some(path) = &args.generate_form {
+        return match std::fs::write(path, bdf_core::testpdf::form_document()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("bdf: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if let Some(path) = &args.list_annotations {
         return list_annotations(path);
     }

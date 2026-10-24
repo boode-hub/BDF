@@ -852,6 +852,33 @@ impl BdfApp {
                     }
                 }
             }
+            Response::FormDone {
+                doc,
+                page,
+                ticket: _,
+                result,
+            } => match result {
+                Ok(out) => {
+                    if let Some(d) = self.docs.get_mut(&doc) {
+                        if out.handled || out.changed {
+                            d.bump(page);
+                        }
+                        if out.changed {
+                            d.dirty = true;
+                        }
+                    }
+                    for p in &mut self.panes {
+                        for t in p.tabs.iter_mut().filter(|t| t.doc == doc) {
+                            t.view.form_focus = out.focused.then_some(page as usize);
+                        }
+                    }
+                }
+                Err(e) => self.toast(
+                    ctx,
+                    format!("The form field could not be updated: {e}"),
+                    true,
+                ),
+            },
             Response::Fault(msg) => {
                 self.toast(ctx, format!("Internal error (recovered): {msg}"), true)
             }
@@ -1201,8 +1228,78 @@ impl BdfApp {
                     self.toast(ctx, "Copied", false);
                 }
                 ViewAction::AddBookmark { page } => self.add_bookmark(ctx, doc, page),
+                ViewAction::Form { page, input } => self.form_input(doc, page, input),
             }
         }
+    }
+
+    pub fn form_input(&mut self, doc: DocId, page: u32, input: bdf_core::engine::FormInput) {
+        let ticket = self.ticket();
+        if let Some(w) = &self.worker {
+            w.send(Request::FormInput {
+                doc,
+                page,
+                input,
+                ticket,
+            });
+        }
+    }
+
+    /// While a form field has focus, typing goes to the field instead of
+    /// moving around the document. Returns true if the field took the input.
+    fn route_keys_to_form(&mut self, ctx: &Context) -> bool {
+        use bdf_core::engine::{FormInput, vkey};
+        let Some((doc, page)) = self
+            .active_tab()
+            .and_then(|t| t.view.form_focus.map(|p| (t.doc, p as u32)))
+        else {
+            return false;
+        };
+        if self.dialog.is_some() || ctx.egui_wants_keyboard_input() {
+            return false;
+        }
+        let mut inputs = Vec::new();
+        ctx.input_mut(|i| {
+            i.events.retain(|e| match e {
+                egui::Event::Text(t) | egui::Event::Paste(t) => {
+                    inputs.extend(t.encode_utf16().map(FormInput::Char));
+                    false
+                }
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => {
+                    let (shift, ctrl) = (modifiers.shift, modifiers.command);
+                    let k = |code| FormInput::Key { code, shift, ctrl };
+                    match key {
+                        // Windows sends Backspace and Enter as characters too.
+                        Key::Backspace => inputs.extend([k(vkey::BACK), FormInput::Char(0x08)]),
+                        Key::Enter => inputs.extend([k(vkey::RETURN), FormInput::Char(0x0D)]),
+                        Key::Tab => inputs.push(k(vkey::TAB)),
+                        Key::Delete => inputs.push(k(vkey::DELETE)),
+                        Key::ArrowLeft => inputs.push(k(vkey::LEFT)),
+                        Key::ArrowRight => inputs.push(k(vkey::RIGHT)),
+                        Key::ArrowUp => inputs.push(k(vkey::UP)),
+                        Key::ArrowDown => inputs.push(k(vkey::DOWN)),
+                        Key::Home => inputs.push(k(vkey::HOME)),
+                        Key::End => inputs.push(k(vkey::END)),
+                        Key::A if ctrl => inputs.push(k(vkey::A)),
+                        Key::Escape => inputs.push(FormInput::KillFocus),
+                        // Other shortcuts (Ctrl+S, ...) keep working.
+                        _ => return true,
+                    }
+                    false
+                }
+                _ => true,
+            })
+        });
+        let had = !inputs.is_empty();
+        for input in inputs {
+            self.form_input(doc, page, input);
+        }
+        had
     }
 
     pub fn copy_selection(&mut self, ctx: &Context) {
@@ -1317,6 +1414,7 @@ impl BdfApp {
         if modal {
             return;
         }
+        let typing_in_form = self.route_keys_to_form(ctx);
         let pane = self.active_pane;
         if take(sc(cmd, Key::O)) {
             self.open_dialog(pane);
@@ -1453,8 +1551,11 @@ impl BdfApp {
             self.select_all_on_page();
         }
 
-        // Plain keys only when no text field has focus.
-        if ctx.egui_wants_keyboard_input() {
+        // Plain keys only when no text field (ours or the document's) has focus.
+        let form_focused = self
+            .active_tab()
+            .is_some_and(|t| t.view.form_focus.is_some());
+        if ctx.egui_wants_keyboard_input() || typing_in_form || form_focused {
             return;
         }
         let pressed = |k: Key| ctx.input(|i| i.key_pressed(k) && i.modifiers.is_none());

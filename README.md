@@ -18,6 +18,7 @@ A fast, portable PDF reader for Windows, macOS and Linux, written in Rust.
 | Search | Find as you type, match case, whole words, all hits highlighted, results list with context; ignores line breaks and hyphenation, matches ligatures and curly quotes |
 | Text | Select (drag, double-click word, triple-click line, across pages) and copy |
 | Markup | Highlight, underline, strikeout, sticky notes, pen, rectangle, ellipse; edit or delete; undo/redo; saved into the PDF so other readers see them |
+| Forms | Fill in text fields, checkboxes, radio buttons, drop-downs and lists; fillable fields are tinted; values save into the PDF |
 | Tools | Magnifier loupe, hand tool, middle-mouse panning |
 | Files | Open recent, drag and drop, password-protected PDFs, document properties, print |
 
@@ -87,7 +88,8 @@ benchmark on Windows, macOS and Linux, enforces the performance budget in
 publishes a release.
 
 The UI test drives the real window with the mouse (highlight, pen, rectangle,
-Edit > Undo, File > Save) and then asks PDFium what the saved file contains.
+Edit > Undo, File > Save, ticking a form checkbox) and then checks what the
+saved file contains.
 
 The engine tests cover rendering, tiles stitching into whole pages, rotation
 geometry, text and links, annotations surviving an in-place save, passwords,
@@ -99,6 +101,7 @@ and 150 truncated or corrupted files opened without a crash.
 bdf [file.pdf ...] [--page N] [--renderer gl|wgpu]
 bdf --bench [file] [--report path]
 bdf --generate N out.pdf
+bdf --generate-form out.pdf         # a one-page test form
 bdf --list-annotations file.pdf      # what PDFium sees, one line per annotation
 ```
 
