@@ -44,7 +44,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Linux packages
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb libxkbcommon-x11-0 libgl1 libegl1 mesa-vulkan-drivers zip
+        run: sudo apt-get update && sudo apt-get install -y xvfb xdotool imagemagick libxkbcommon-x11-0 libgl1 libegl1 mesa-vulkan-drivers zip
       - name: Fetch PDFium
         run: scripts/fetch_pdfium.sh ${{ matrix.platform }}
       - name: Unit and engine tests
@@ -56,12 +56,16 @@ jobs:
           cp .pdfium/*pdfium* target/release/
           mkdir -p bench-data
           export BDF_DATA_DIR="$PWD/bench-data"
+          mkdir -p shots
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a -s "-screen 0 1600x1000x24" target/release/bdf --bench --report bench.json
+            BDF_BENCH_SHOTS="$PWD/shots" xvfb-run -a -s "-screen 0 1600x1000x24" target/release/bdf --bench --report bench.json
           else
             target/release/bdf --bench --report bench.json
           fi
           python3 scripts/check_bench.py bench.json
+      - name: UI test (real clicks on the real app)
+        if: runner.os == 'Linux'
+        run: scripts/ui_smoke.sh target/release/bdf shots
       - name: Package portable zip
         run: scripts/package.sh ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
@@ -71,6 +75,7 @@ jobs:
             dist/*.zip
             bench.json
             bench-data/bdf.log
+            shots/*.png
           if-no-files-found: error
 
   release:

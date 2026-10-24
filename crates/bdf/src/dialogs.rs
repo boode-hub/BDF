@@ -141,9 +141,8 @@ impl BdfApp {
                             .desired_width(f32::INFINITY)
                             .hint_text("Type your note…"),
                     );
-                    if !r.has_focus() && ui.memory(|m| m.focused().is_none()) {
-                        r.request_focus();
-                    }
+                    // The note box owns the keyboard while the dialog is open.
+                    r.request_focus();
                     ui.weak("Ctrl+Enter to save");
                     buttons(ui, |ui| {
                         if primary(ui, "Save") {

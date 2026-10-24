@@ -22,8 +22,53 @@ fn tool_button(ui: &mut Ui, glyph: &str, tip: &str, selected: bool, enabled: boo
     ui.add_enabled(enabled, b).on_hover_text(tip).clicked()
 }
 
+/// Menu text with its icon in a fixed-width column. Labels written as
+/// "<icon>  text" keep their icon; labels padded with spaces get an invisible
+/// placeholder of the same width, so every item lines up.
+fn menu_text(ui: &Ui, label: &str) -> egui::WidgetText {
+    use egui::text::{LayoutJob, TextFormat};
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    // PLACEHOLDER lets the button apply its own colour (normal, hovered, disabled).
+    let color = Color32::PLACEHOLDER;
+    let first = label.chars().next().unwrap_or(' ');
+    let is_icon = ('\u{E000}'..='\u{F8FF}').contains(&first);
+    let (glyph, glyph_color, rest) = if is_icon {
+        (
+            first.to_string(),
+            color,
+            label[first.len_utf8()..].trim_start(),
+        )
+    } else {
+        (
+            icon::CHECK.to_string(),
+            Color32::TRANSPARENT,
+            label.trim_start(),
+        )
+    };
+    let mut job = LayoutJob::default();
+    job.append(
+        &glyph,
+        0.0,
+        TextFormat {
+            font_id: font.clone(),
+            color: glyph_color,
+            ..Default::default()
+        },
+    );
+    job.append(
+        rest,
+        10.0,
+        TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    job.into()
+}
+
 fn menu_item(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
-    let b = Button::new(label).shortcut_text(shortcut);
+    let b = Button::new(menu_text(ui, label)).shortcut_text(shortcut);
     let r = ui.add_enabled(enabled, b);
     if r.clicked() {
         ui.close();
@@ -34,7 +79,11 @@ fn menu_item(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
 }
 
 fn check_item(ui: &mut Ui, label: &str, shortcut: &str, on: bool) -> bool {
-    let text = format!("{}  {label}", if on { icon::CHECK } else { "    " });
+    let text = if on {
+        format!("{}  {label}", icon::CHECK)
+    } else {
+        format!("      {label}")
+    };
     menu_item(ui, &text, shortcut, true)
 }
 

@@ -33,6 +33,8 @@ Options:
       --bench [file]     Run the built-in benchmark (generates a test file if none given)
       --report path      Where --bench writes its JSON report (default bdf-bench.json)
       --generate N path  Write an N-page test PDF and exit
+      --list-annotations file
+                         Print the annotations PDFium sees in a file and exit
   -h, --help             Show this help
   -V, --version          Show the version
 ";
@@ -45,6 +47,7 @@ struct Args {
     bench: Option<Option<PathBuf>>,
     report: Option<PathBuf>,
     generate: Option<(usize, PathBuf)>,
+    list_annotations: Option<PathBuf>,
     help: bool,
     version: bool,
 }
@@ -82,6 +85,10 @@ fn parse_args() -> Result<Args, String> {
                 };
                 a.bench = Some(file);
             }
+            "--list-annotations" => {
+                a.list_annotations =
+                    Some(it.next().ok_or("--list-annotations needs a file")?.into())
+            }
             "--report" => a.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--generate" => {
                 let n = it.next().ok_or("--generate needs a page count")?;
@@ -109,7 +116,12 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if args.help || args.version || args.generate.is_some() || args.bench.is_some() {
+    if args.help
+        || args.version
+        || args.generate.is_some()
+        || args.bench.is_some()
+        || args.list_annotations.is_some()
+    {
         platform::attach_console();
     }
     if args.help {
@@ -128,6 +140,10 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         };
+    }
+
+    if let Some(path) = &args.list_annotations {
+        return list_annotations(path);
     }
 
     let data = DataDir::locate();
@@ -238,4 +254,34 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `--list-annotations`: one line per annotation, as PDFium sees the pages.
+fn list_annotations(path: &std::path::Path) -> ExitCode {
+    use bdf_core::engine::{DocId, Engine};
+    let mut engine = match bdf_core::pdfium::PdfiumEngine::load() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("bdf: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let info = match engine.open(DocId(1), path, None) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("bdf: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    for page in 0..info.page_sizes.len() as u32 {
+        for a in engine.annotations(DocId(1), page).unwrap_or_default() {
+            println!(
+                "page {}\t{}\t{}",
+                page + 1,
+                a.kind.label(),
+                a.contents.replace('\n', " ")
+            );
+        }
+    }
+    ExitCode::SUCCESS
 }
