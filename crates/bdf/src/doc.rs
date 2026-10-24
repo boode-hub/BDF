@@ -24,13 +24,15 @@ pub struct SearchState {
 
 impl SearchState {
     pub fn add_hits(&mut self, hits: Vec<SearchHit>) {
-        let Some(page) = hits.first().map(|h| h.page) else { return };
+        let Some(page) = hits.first().map(|h| h.page) else {
+            return;
+        };
         let at = self.hits.partition_point(|h| h.page < page);
         // The current hit index shifts if hits land before it.
-        if let Some(c) = self.current.as_mut() {
-            if *c >= at {
-                *c += hits.len();
-            }
+        if let Some(c) = self.current.as_mut()
+            && *c >= at
+        {
+            *c += hits.len();
         }
         self.hits.splice(at..at, hits);
     }
@@ -90,7 +92,6 @@ pub struct DocState {
     pub id: DocId,
     pub info: Arc<DocInfo>,
     pub path: PathBuf,
-    pub password: Option<String>,
     pub dirty: bool,
     pub saving: bool,
     /// Bumped on every edit of a page, so stale images are never shown.
@@ -105,13 +106,12 @@ pub struct DocState {
 }
 
 impl DocState {
-    pub fn new(id: DocId, info: DocInfo, password: Option<String>) -> Self {
+    pub fn new(id: DocId, info: DocInfo) -> Self {
         let path = info.path.clone();
         Self {
             id,
             info: Arc::new(info),
             path,
-            password,
             dirty: false,
             saving: false,
             generations: HashMap::new(),
@@ -148,23 +148,13 @@ impl DocState {
         self.annots.stale = true;
     }
 
-    /// Every page changed (after a save reopened the document).
-    pub fn bump_all(&mut self) {
-        for p in 0..self.page_count() as u32 {
-            *self.generations.entry(p).or_insert(0) += 1;
-        }
-        self.page_data.clear();
-        self.page_data_order.clear();
-        self.requested.clear();
-    }
-
     /// Page data if loaded; otherwise asks the engine for it.
     pub fn page_data(&mut self, page: u32, worker: &WorkerHandle) -> Option<Arc<PageData>> {
         let gen_ = self.generation(page);
-        if let Some((g, d)) = self.page_data.get(&page) {
-            if *g == gen_ {
-                return Some(d.clone());
-            }
+        if let Some((g, d)) = self.page_data.get(&page)
+            && *g == gen_
+        {
+            return Some(d.clone());
         }
         if self.requested.insert((page, gen_)) {
             worker.send(Request::PageData { doc: self.id, page });
@@ -174,7 +164,10 @@ impl DocState {
 
     pub fn peek_page_data(&self, page: u32) -> Option<Arc<PageData>> {
         let g = self.generation(page);
-        self.page_data.get(&page).filter(|(pg, _)| *pg == g).map(|(_, d)| d.clone())
+        self.page_data
+            .get(&page)
+            .filter(|(pg, _)| *pg == g)
+            .map(|(_, d)| d.clone())
     }
 
     pub fn store_page_data(&mut self, page: u32, data: PageData) {
@@ -209,7 +202,11 @@ mod tests {
     use super::*;
 
     fn hit(page: u32) -> SearchHit {
-        SearchHit { page, rects: vec![], snippet: String::new() }
+        SearchHit {
+            page,
+            rects: vec![],
+            snippet: String::new(),
+        }
     }
 
     #[test]
@@ -229,7 +226,10 @@ mod tests {
         assert_eq!(s.step(true, 6), Some(2)); // first hit at/after page 6
         s.add_hits(vec![hit(1)]); // arrives after wrapping
         assert_eq!(s.current, Some(3));
-        assert_eq!(s.hits.iter().map(|h| h.page).collect::<Vec<_>>(), vec![1, 5, 5, 8]);
+        assert_eq!(
+            s.hits.iter().map(|h| h.page).collect::<Vec<_>>(),
+            vec![1, 5, 5, 8]
+        );
         assert_eq!(s.step(true, 0), Some(0)); // wraps
         assert_eq!(s.step(false, 0), Some(3));
         assert_eq!(s.on_page(5), 1..3);

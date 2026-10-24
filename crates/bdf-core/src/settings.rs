@@ -122,7 +122,13 @@ impl Settings {
     /// Moves `path` to the top of the recent list.
     pub fn touch_recent(&mut self, path: &Path) {
         self.recent.retain(|r| r.path != path);
-        self.recent.insert(0, RecentFile { path: path.to_path_buf(), opened: now_secs() });
+        self.recent.insert(
+            0,
+            RecentFile {
+                path: path.to_path_buf(),
+                opened: now_secs(),
+            },
+        );
         self.recent.truncate(MAX_RECENT);
     }
 
@@ -137,7 +143,10 @@ impl Settings {
                 .map(|(k, m)| (m.seen, k.clone()))
                 .collect();
             by_age.sort();
-            for (_, k) in by_age.into_iter().take(self.docs.len() + 1 - MAX_DOC_MEMORY) {
+            for (_, k) in by_age
+                .into_iter()
+                .take(self.docs.len() + 1 - MAX_DOC_MEMORY)
+            {
                 self.docs.remove(&k);
             }
         }
@@ -149,14 +158,26 @@ impl Settings {
     /// Clamps values a hand-edited file might have broken.
     pub fn sanitize(&mut self) {
         self.cache_mib = self.cache_mib.clamp(32, 4096);
-        self.sidebar_width = if self.sidebar_width.is_finite() { self.sidebar_width.clamp(140.0, 600.0) } else { 220.0 };
-        self.ink_width = if self.ink_width.is_finite() { self.ink_width.clamp(0.5, 20.0) } else { 2.0 };
-        self.magnifier_zoom = if self.magnifier_zoom.is_finite() { self.magnifier_zoom.clamp(1.5, 8.0) } else { 2.5 };
+        self.sidebar_width = if self.sidebar_width.is_finite() {
+            self.sidebar_width.clamp(140.0, 600.0)
+        } else {
+            220.0
+        };
+        self.ink_width = if self.ink_width.is_finite() {
+            self.ink_width.clamp(0.5, 20.0)
+        } else {
+            2.0
+        };
+        self.magnifier_zoom = if self.magnifier_zoom.is_finite() {
+            self.magnifier_zoom.clamp(1.5, 8.0)
+        } else {
+            2.5
+        };
         self.recent.truncate(MAX_RECENT);
-        if let Some(w) = self.window {
-            if w.iter().any(|v| !v.is_finite()) || w[2] < 200.0 || w[3] < 150.0 {
-                self.window = None;
-            }
+        if let Some(w) = self.window
+            && (w.iter().any(|v| !v.is_finite()) || w[2] < 200.0 || w[3] < 150.0)
+        {
+            self.window = None;
         }
     }
 }
@@ -174,18 +195,30 @@ impl DataDir {
         if let Some(p) = std::env::var_os("BDF_DATA_DIR") {
             let path = PathBuf::from(p);
             let _ = std::fs::create_dir_all(&path);
-            return DataDir { path, portable: true };
+            return DataDir {
+                path,
+                portable: true,
+            };
         }
-        if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        if let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(Path::to_path_buf))
+        {
             let path = exe_dir.join("BDF-data");
             if is_writable_dir(&path) {
-                return DataDir { path, portable: true };
+                return DataDir {
+                    path,
+                    portable: true,
+                };
             }
         }
         let base = user_config_dir().unwrap_or_else(std::env::temp_dir);
         let path = base.join("BDF");
         let _ = std::fs::create_dir_all(&path);
-        DataDir { path, portable: false }
+        DataDir {
+            path,
+            portable: false,
+        }
     }
 
     pub fn settings_file(&self) -> PathBuf {
@@ -266,8 +299,14 @@ mod tests {
     fn round_trip() {
         let d = tmpdir("rt");
         let f = d.join("settings.json");
-        let mut s = Settings { dark_pages: true, ..Default::default() };
-        s.doc_mut("id:ab").bookmarks.push(UserBookmark { title: "x".into(), page: 3 });
+        let mut s = Settings {
+            dark_pages: true,
+            ..Default::default()
+        };
+        s.doc_mut("id:ab").bookmarks.push(UserBookmark {
+            title: "x".into(),
+            page: 3,
+        });
         save_settings(&f, &s).unwrap();
         let back = load_settings(&f);
         assert!(back.dark_pages);
@@ -303,13 +342,22 @@ mod tests {
         s.touch_recent(Path::new("/f20.pdf"));
         assert_eq!(s.recent.len(), MAX_RECENT);
         assert_eq!(s.recent[0].path, PathBuf::from("/f20.pdf"));
-        assert_eq!(s.recent.iter().filter(|r| r.path == Path::new("/f20.pdf")).count(), 1);
+        assert_eq!(
+            s.recent
+                .iter()
+                .filter(|r| r.path == Path::new("/f20.pdf"))
+                .count(),
+            1
+        );
     }
 
     #[test]
     fn doc_memory_is_pruned_but_bookmarks_survive() {
         let mut s = Settings::default();
-        s.doc_mut("keep").bookmarks.push(UserBookmark { title: "b".into(), page: 1 });
+        s.doc_mut("keep").bookmarks.push(UserBookmark {
+            title: "b".into(),
+            page: 1,
+        });
         s.docs.get_mut("keep").unwrap().seen = 0;
         for i in 0..(MAX_DOC_MEMORY + 20) {
             s.doc_mut(&format!("d{i}"));

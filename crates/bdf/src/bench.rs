@@ -43,7 +43,10 @@ pub struct Bench {
 fn shot(name: &str) {
     if let Some(dir) = std::env::var_os("BDF_BENCH_SHOTS") {
         let path = std::path::Path::new(&dir).join(format!("{name}.png"));
-        let _ = std::process::Command::new("import").args(["-window", "root"]).arg(path).status();
+        let _ = std::process::Command::new("import")
+            .args(["-window", "root"])
+            .arg(path)
+            .status();
     }
 }
 
@@ -109,7 +112,11 @@ impl Bench {
                     let step = v.viewport.y * 0.35;
                     v.scroll_by(vec2(0.0, step));
                 }
-                self.phase = if n >= 300 { Phase::Zoom(0) } else { Phase::Scroll(n + 1) };
+                self.phase = if n >= 300 {
+                    Phase::Zoom(0)
+                } else {
+                    Phase::Scroll(n + 1)
+                };
             }
             Phase::Zoom(n) => {
                 self.phase_frames.extend(last_frame);
@@ -185,7 +192,7 @@ impl Bench {
             }
             Phase::Idle(t0, cpu0) => {
                 self.idle_frames += 1;
-                if self.idle_frames % 50 == 0 {
+                if self.idle_frames.is_multiple_of(50) {
                     log::warn!("still repainting while idle: {:?}", ctx.repaint_causes());
                 }
                 if t0.elapsed() < Duration::from_secs(3) {
@@ -225,7 +232,11 @@ impl Bench {
             .as_ref()
             .map(|w| {
                 use std::sync::atomic::Ordering::Relaxed;
-                (w.stats.tiles_rendered.load(Relaxed), w.stats.render_micros.load(Relaxed), w.stats.tiles_dropped.load(Relaxed))
+                (
+                    w.stats.tiles_rendered.load(Relaxed),
+                    w.stats.render_micros.load(Relaxed),
+                    w.stats.tiles_dropped.load(Relaxed),
+                )
             })
             .unwrap_or_default();
         let mut all = self.scroll_frames.clone();

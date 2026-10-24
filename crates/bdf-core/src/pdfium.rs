@@ -80,7 +80,10 @@ pub fn locate_library() -> Vec<PathBuf> {
             out.push(p);
         }
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         out.push(dir.join(&name));
         out.push(dir.join("lib").join(&name));
     }
@@ -157,7 +160,9 @@ impl PdfiumEngine {
     }
 
     fn doc(&mut self, id: DocId) -> EResult<&mut Doc> {
-        self.docs.get_mut(&id).ok_or_else(|| "document is not open".to_string())
+        self.docs
+            .get_mut(&id)
+            .ok_or_else(|| "document is not open".to_string())
     }
 
     fn page(&mut self, id: DocId, index: u32) -> EResult<FPDF_PAGE> {
@@ -192,11 +197,11 @@ impl PdfiumEngine {
     /// Drops a cached page so the next use reloads it (after edits).
     fn evict_page(&mut self, id: DocId, index: u32) {
         let lib = &*self.lib;
-        if let Some(doc) = self.docs.get_mut(&id) {
-            if let Some(pos) = doc.pages.iter().position(|(i, _)| *i == index) {
-                let (_, h) = doc.pages.remove(pos);
-                close_page(lib, doc.form, h);
-            }
+        if let Some(doc) = self.docs.get_mut(&id)
+            && let Some(pos) = doc.pages.iter().position(|(i, _)| *i == index)
+        {
+            let (_, h) = doc.pages.remove(pos);
+            close_page(lib, doc.form, h);
         }
     }
 
@@ -216,7 +221,8 @@ impl PdfiumEngine {
         if len == 0 {
             return Err(OpenError::NotPdf);
         }
-        if len > c_ulong::MAX as u64 {
+        // c_ulong is 32-bit on Windows, so PDFium's file callback caps file size there.
+        if c_ulong::try_from(len).is_err() {
             return Err(OpenError::Unsupported(
                 "files larger than 4 GB are not supported on this platform".into(),
             ));
@@ -232,16 +238,20 @@ impl PdfiumEngine {
                 FPDF_ERR_PASSWORD => OpenError::PasswordRequired,
                 FPDF_ERR_FILE => OpenError::Unreadable("read error".into()),
                 FPDF_ERR_FORMAT | FPDF_ERR_PAGE => OpenError::NotPdf,
-                FPDF_ERR_SECURITY => {
-                    OpenError::Unsupported("unsupported security handler".into())
-                }
+                FPDF_ERR_SECURITY => OpenError::Unsupported("unsupported security handler".into()),
                 e => OpenError::Engine(format!("error code {e}")),
             });
         }
         Ok((handle, access))
     }
 
-    fn build_doc(&self, handle: FPDF_DOCUMENT, access: Box<Access>, path: &Path, password: Option<&str>) -> Result<Doc, OpenError> {
+    fn build_doc(
+        &self,
+        handle: FPDF_DOCUMENT,
+        access: Box<Access>,
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<Doc, OpenError> {
         let lib = &*self.lib;
         // SAFETY: valid handle.
         let count = unsafe { lib.FPDF_GetPageCount(handle) };
@@ -252,11 +262,22 @@ impl PdfiumEngine {
         }
         let mut sizes = Vec::with_capacity(count as usize);
         for i in 0..count {
-            let mut s = FS_SIZEF { width: 0.0, height: 0.0 };
+            let mut s = FS_SIZEF {
+                width: 0.0,
+                height: 0.0,
+            };
             // SAFETY: valid handle and index; `s` is a valid out pointer.
             let ok = unsafe { lib.FPDF_GetPageSizeByIndexF(handle, i, &mut s) };
-            let good = ok != 0 && s.width.is_finite() && s.height.is_finite() && s.width > 0.0 && s.height > 0.0;
-            sizes.push(if good { (s.width, s.height) } else { (612.0, 792.0) });
+            let good = ok != 0
+                && s.width.is_finite()
+                && s.height.is_finite()
+                && s.width > 0.0
+                && s.height > 0.0;
+            sizes.push(if good {
+                (s.width, s.height)
+            } else {
+                (612.0, 792.0)
+            });
         }
         // SAFETY: valid handle.
         let has_form = unsafe { lib.FPDF_GetFormType(handle) } != FORMTYPE_NONE;
@@ -304,10 +325,25 @@ impl PdfiumEngine {
             }
         }
         let mut metadata = Vec::new();
-        for tag in ["Title", "Author", "Subject", "Keywords", "Creator", "Producer", "CreationDate", "ModDate"] {
+        for tag in [
+            "Title",
+            "Author",
+            "Subject",
+            "Keywords",
+            "Creator",
+            "Producer",
+            "CreationDate",
+            "ModDate",
+        ] {
             // SAFETY: valid handle; buffer handled by helper.
-            if let Some(v) = utf16_buffer(|buf, len| unsafe { lib.FPDF_GetMetaText(h, tag, buf, len) }) {
-                let v = if tag.ends_with("Date") { format_pdf_date(&v) } else { v };
+            if let Some(v) =
+                utf16_buffer(|buf, len| unsafe { lib.FPDF_GetMetaText(h, tag, buf, len) })
+            {
+                let v = if tag.ends_with("Date") {
+                    format_pdf_date(&v)
+                } else {
+                    v
+                };
                 if !v.trim().is_empty() {
                     metadata.push((tag.to_string(), v));
                 }
@@ -322,7 +358,9 @@ impl PdfiumEngine {
         let fingerprint = {
             let mut buf = vec![0u8; 64];
             // SAFETY: buffer is 64 bytes, as declared.
-            let n = unsafe { lib.FPDF_GetFileIdentifier(h, 0, buf.as_mut_ptr().cast(), buf.len() as c_ulong) } as usize;
+            let n = unsafe {
+                lib.FPDF_GetFileIdentifier(h, 0, buf.as_mut_ptr().cast(), buf.len() as c_ulong)
+            } as usize;
             if n > 1 && n <= buf.len() {
                 buf.truncate(n - 1); // drop the NUL
                 format!("id:{}", hex(&buf))
@@ -378,7 +416,10 @@ impl PdfiumEngine {
         if printing {
             flags |= FPDF_PRINTING;
         }
-        let (fw, fh) = (full.0.min(i32::MAX as u32) as c_int, full.1.min(i32::MAX as u32) as c_int);
+        let (fw, fh) = (
+            full.0.min(i32::MAX as u32) as c_int,
+            full.1.min(i32::MAX as u32) as c_int,
+        );
         let mut rgba = vec![0u8; w as usize * h as usize * 4];
         // SAFETY: bitmap and page are valid; PDFium clips drawing to the bitmap.
         unsafe {
@@ -404,7 +445,11 @@ impl PdfiumEngine {
         for px in rgba.chunks_exact_mut(4) {
             px[3] = 255;
         }
-        Ok(Image { width: w, height: h, rgba })
+        Ok(Image {
+            width: w,
+            height: h,
+            rgba,
+        })
     }
 
     fn size_of(&self, id: DocId, page: u32) -> EResult<(f32, f32)> {
@@ -490,7 +535,12 @@ fn close_doc_handles(lib: &dyn PdfiumLibraryBindings, mut doc: Doc) {
 }
 
 impl Engine for PdfiumEngine {
-    fn open(&mut self, id: DocId, path: &Path, password: Option<&str>) -> Result<DocInfo, OpenError> {
+    fn open(
+        &mut self,
+        id: DocId,
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<DocInfo, OpenError> {
         let (handle, access) = self.open_handle(path, password)?;
         let doc = self.build_doc(handle, access, path, password)?;
         let info = self.doc_info(&doc, path);
@@ -509,7 +559,14 @@ impl Engine for PdfiumEngine {
         let mut img = match key.kind {
             TileKind::Tile { .. } => {
                 let ((x, y, w, h), full) = key.pixel_rect(size);
-                self.render_rect(key.doc, key.page, key.rotation, full, (x as i32, y as i32, w, h), false)?
+                self.render_rect(
+                    key.doc,
+                    key.page,
+                    key.rotation,
+                    full,
+                    (x as i32, y as i32, w, h),
+                    false,
+                )?
             }
             TileKind::Thumb => {
                 let (w, h) = thumb_px(size);
@@ -525,19 +582,29 @@ impl Engine for PdfiumEngine {
     fn render_region(&mut self, r: &RegionReq) -> EResult<Image> {
         let size = r.rotation.apply_size(self.size_of(r.doc, r.page)?);
         let full = page_px(size, r.scale);
-        let mut img = self.render_rect(r.doc, r.page, r.rotation, full, (r.x, r.y, r.w, r.h), false)?;
+        let mut img =
+            self.render_rect(r.doc, r.page, r.rotation, full, (r.x, r.y, r.w, r.h), false)?;
         if r.invert {
             img.invert();
         }
         Ok(img)
     }
 
-    fn render_page(&mut self, id: DocId, page: u32, w: u32, h: u32, printing: bool) -> EResult<Image> {
+    fn render_page(
+        &mut self,
+        id: DocId,
+        page: u32,
+        w: u32,
+        h: u32,
+        printing: bool,
+    ) -> EResult<Image> {
         self.render_rect(id, page, Rotation::R0, (w, h), (0, 0, w, h), printing)
     }
 
     fn page_size(&self, id: DocId, page: u32) -> Option<(f32, f32)> {
-        self.docs.get(&id).and_then(|d| d.sizes.get(page as usize).copied())
+        self.docs
+            .get(&id)
+            .and_then(|d| d.sizes.get(page as usize).copied())
     }
 
     fn page_data(&mut self, id: DocId, index: u32) -> EResult<PageData> {
@@ -545,7 +612,12 @@ impl Engine for PdfiumEngine {
         let page = self.page(id, index)?;
         let lib = &*self.lib;
         let doc = self.docs.get(&id).ok_or("document is not open")?;
-        let mut bbox = FS_RECTF { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+        let mut bbox = FS_RECTF {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        };
         // SAFETY: valid page and out pointer.
         let bbox = if unsafe { lib.FPDF_GetPageBoundingBox(page, &mut bbox) } != 0 {
             [bbox.left, bbox.bottom, bbox.right, bbox.top]
@@ -557,7 +629,13 @@ impl Engine for PdfiumEngine {
         let rotation = Rotation::from_quarters(unsafe { lib.FPDFPage_GetRotation(page) });
         let links = read_links(lib, doc.handle, page);
         let annots = read_annots(lib, page);
-        Ok(PageData { bbox, rotation, text, links, annots })
+        Ok(PageData {
+            bbox,
+            rotation,
+            text,
+            links,
+            annots,
+        })
     }
 
     fn page_text(&mut self, id: DocId, page: u32) -> EResult<PageText> {
@@ -581,7 +659,10 @@ impl Engine for PdfiumEngine {
             },
             NewAnnot::Note { .. } => ANNOT_TEXT,
             NewAnnot::Ink { .. } => ANNOT_INK,
-            NewAnnot::Shape { kind: AnnotKind::Circle, .. } => ANNOT_CIRCLE,
+            NewAnnot::Shape {
+                kind: AnnotKind::Circle,
+                ..
+            } => ANNOT_CIRCLE,
             NewAnnot::Shape { .. } => ANNOT_SQUARE,
         };
         // SAFETY: valid page; the annotation is closed at the end.
@@ -602,16 +683,40 @@ impl Engine for PdfiumEngine {
             unsafe { lib.FPDFAnnot_SetFlags(a, ANNOT_FLAG_PRINT) };
             let set_color = |c: &[u8; 3]| -> EResult<()> {
                 // SAFETY: valid annotation.
-                let ok = unsafe { lib.FPDFAnnot_SetColor(a, COLORTYPE_COLOR as _, c[0] as _, c[1] as _, c[2] as _, 255) };
-                if ok == 0 { Err("could not set the colour".into()) } else { Ok(()) }
+                let ok = unsafe {
+                    lib.FPDFAnnot_SetColor(
+                        a,
+                        COLORTYPE_COLOR as _,
+                        c[0] as _,
+                        c[1] as _,
+                        c[2] as _,
+                        255,
+                    )
+                };
+                if ok == 0 {
+                    Err("could not set the colour".into())
+                } else {
+                    Ok(())
+                }
             };
             let set_rect = |r: [f32; 4]| -> EResult<()> {
-                let fr = FS_RECTF { left: r[0], bottom: r[1], right: r[2], top: r[3] };
+                let fr = FS_RECTF {
+                    left: r[0],
+                    bottom: r[1],
+                    right: r[2],
+                    top: r[3],
+                };
                 // SAFETY: valid annotation and rect pointer.
-                if unsafe { lib.FPDFAnnot_SetRect(a, &fr) } == 0 { Err("could not set the rectangle".into()) } else { Ok(()) }
+                if unsafe { lib.FPDFAnnot_SetRect(a, &fr) } == 0 {
+                    Err("could not set the rectangle".into())
+                } else {
+                    Ok(())
+                }
             };
             match annot {
-                NewAnnot::Markup { rects, color, text, .. } => {
+                NewAnnot::Markup {
+                    rects, color, text, ..
+                } => {
                     if rects.is_empty() {
                         return Err("nothing selected".into());
                     }
@@ -619,16 +724,25 @@ impl Engine for PdfiumEngine {
                     let mut bounds = rects[0];
                     for r in rects {
                         let q = FS_QUADPOINTSF {
-                            x1: r[0], y1: r[3],
-                            x2: r[2], y2: r[3],
-                            x3: r[0], y3: r[1],
-                            x4: r[2], y4: r[1],
+                            x1: r[0],
+                            y1: r[3],
+                            x2: r[2],
+                            y2: r[3],
+                            x3: r[0],
+                            y3: r[1],
+                            x4: r[2],
+                            y4: r[1],
                         };
                         // SAFETY: valid annotation and quad pointer.
                         if unsafe { lib.FPDFAnnot_AppendAttachmentPoints(a, &q) } == 0 {
                             return Err("could not set the highlight area".into());
                         }
-                        bounds = [bounds[0].min(r[0]), bounds[1].min(r[1]), bounds[2].max(r[2]), bounds[3].max(r[3])];
+                        bounds = [
+                            bounds[0].min(r[0]),
+                            bounds[1].min(r[1]),
+                            bounds[2].max(r[2]),
+                            bounds[3].max(r[3]),
+                        ];
                     }
                     set_rect(bounds)?;
                     if !text.is_empty() {
@@ -640,12 +754,17 @@ impl Engine for PdfiumEngine {
                     set_rect([*x, *y - 24.0, *x + 24.0, *y])?;
                     set_annot_string(lib, a, "Contents", text)?;
                 }
-                NewAnnot::Ink { strokes, color, width } => {
+                NewAnnot::Ink {
+                    strokes,
+                    color,
+                    width,
+                } => {
                     set_color(color)?;
                     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
                     let mut any = false;
                     for s in strokes.iter().filter(|s| !s.is_empty()) {
-                        let pts: Vec<FS_POINTF> = s.iter().map(|&(x, y)| FS_POINTF { x, y }).collect();
+                        let pts: Vec<FS_POINTF> =
+                            s.iter().map(|&(x, y)| FS_POINTF { x, y }).collect();
                         for p in &pts {
                             b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
                         }
@@ -663,7 +782,9 @@ impl Engine for PdfiumEngine {
                     let pad = width.max(1.0);
                     set_rect([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])?;
                 }
-                NewAnnot::Shape { rect, color, width, .. } => {
+                NewAnnot::Shape {
+                    rect, color, width, ..
+                } => {
                     set_color(color)?;
                     // SAFETY: valid annotation.
                     unsafe { lib.FPDFAnnot_SetBorder(a, 0.0, 0.0, *width) };
@@ -689,25 +810,47 @@ impl Engine for PdfiumEngine {
         Ok(name)
     }
 
-    fn remove_annot(&mut self, id: DocId, index: u32, ai: usize, name: Option<&str>) -> EResult<()> {
+    fn remove_annot(
+        &mut self,
+        id: DocId,
+        index: u32,
+        ai: usize,
+        name: Option<&str>,
+    ) -> EResult<()> {
         let page = self.page(id, index)?;
-        let i = self.find_annot(page, ai, name).ok_or("the annotation no longer exists")?;
+        let i = self
+            .find_annot(page, ai, name)
+            .ok_or("the annotation no longer exists")?;
         // SAFETY: valid page and index.
         let ok = unsafe { self.lib.FPDFPage_RemoveAnnot(page, i) };
         self.evict_page(id, index);
-        if ok == 0 { Err("the annotation could not be removed".into()) } else { Ok(()) }
+        if ok == 0 {
+            Err("the annotation could not be removed".into())
+        } else {
+            Ok(())
+        }
     }
 
-    fn set_annot_contents(&mut self, id: DocId, index: u32, ai: usize, name: Option<&str>, text: &str) -> EResult<()> {
+    fn set_annot_contents(
+        &mut self,
+        id: DocId,
+        index: u32,
+        ai: usize,
+        name: Option<&str>,
+        text: &str,
+    ) -> EResult<()> {
         let page = self.page(id, index)?;
-        let i = self.find_annot(page, ai, name).ok_or("the annotation no longer exists")?;
+        let i = self
+            .find_annot(page, ai, name)
+            .ok_or("the annotation no longer exists")?;
         let lib = &*self.lib;
         // SAFETY: valid page and index; closed below.
         let a = unsafe { lib.FPDFPage_GetAnnot(page, i) };
         if a.is_null() {
             return Err("the annotation could not be opened".into());
         }
-        let r = set_annot_string(lib, a, "Contents", text).and_then(|_| set_annot_string(lib, a, "M", &pdf_now()));
+        let r = set_annot_string(lib, a, "Contents", text)
+            .and_then(|_| set_annot_string(lib, a, "M", &pdf_now()));
         // SAFETY: handle from GetAnnot.
         unsafe { lib.FPDFPage_CloseAnnot(a) };
         self.evict_page(id, index);
@@ -717,15 +860,26 @@ impl Engine for PdfiumEngine {
     fn save(&mut self, id: DocId, target: &Path) -> EResult<()> {
         let lib = &*self.lib;
         let doc = self.docs.get(&id).ok_or("document is not open")?;
-        let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        let stem = target.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+        let dir = target
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let stem = target
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "document".into());
         let tmp = dir.join(format!("{stem}.bdf-saving.pdf"));
         // SAFETY: valid handle.
         let incremental = unsafe { lib.FPDF_DocumentHasValidCrossReferenceTable(doc.handle) } != 0;
         {
-            let file = File::create(&tmp).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+            let file =
+                File::create(&tmp).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
             let mut w = Box::new(Writer::new(file));
-            let flags = if incremental { FPDF_INCREMENTAL } else { FPDF_NO_INCREMENTAL };
+            let flags = if incremental {
+                FPDF_INCREMENTAL
+            } else {
+                FPDF_NO_INCREMENTAL
+            };
             // SAFETY: `w` lives across the call; its first field is the FPDF_FILEWRITE.
             let ok = unsafe { lib.FPDF_SaveAsCopy(doc.handle, &mut w.fw, flags as _) };
             let finished = w.finish();
@@ -746,12 +900,16 @@ impl Engine for PdfiumEngine {
                 unsafe { lib.FPDF_CloseDocument(h) };
                 if pages as usize != doc.sizes.len() {
                     let _ = std::fs::remove_file(&tmp);
-                    return Err("the saved copy failed verification; the original is unchanged".into());
+                    return Err(
+                        "the saved copy failed verification; the original is unchanged".into(),
+                    );
                 }
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&tmp);
-                return Err(format!("the saved copy failed verification ({e}); the original is unchanged"));
+                return Err(format!(
+                    "the saved copy failed verification ({e}); the original is unchanged"
+                ));
             }
         }
         let password = doc.password.clone();
@@ -766,9 +924,17 @@ impl Engine for PdfiumEngine {
             Err(e) => {
                 // Keep the user's changes: continue from the verified copy.
                 let msg = if same_file {
-                    format!("{} could not be replaced ({e}). Your changes are in {}.", target.display(), tmp.display())
+                    format!(
+                        "{} could not be replaced ({e}). Your changes are in {}.",
+                        target.display(),
+                        tmp.display()
+                    )
                 } else {
-                    format!("{} could not be written ({e}). Your changes are in {}.", target.display(), tmp.display())
+                    format!(
+                        "{} could not be written ({e}). Your changes are in {}.",
+                        target.display(),
+                        tmp.display()
+                    )
                 };
                 (tmp.clone(), Some(msg))
             }
@@ -788,7 +954,9 @@ impl Engine for PdfiumEngine {
                 {
                     self.docs.insert(id, d);
                 }
-                return Err(format!("saved, but the document could not be reopened: {e}"));
+                return Err(format!(
+                    "saved, but the document could not be reopened: {e}"
+                ));
             }
         }
         match err {
@@ -857,7 +1025,7 @@ impl Access {
     fn new(file: File, len: u64) -> Box<Self> {
         let mut a = Box::new(Access {
             fa: FPDF_FILEACCESS {
-                m_FileLen: len as c_ulong,
+                m_FileLen: c_ulong::try_from(len).unwrap_or(c_ulong::MAX),
                 m_GetBlock: Some(get_block),
                 m_Param: null_mut(),
             },
@@ -871,7 +1039,9 @@ impl Access {
     }
 
     fn read_at(&mut self, pos: u64, out: &mut [u8]) -> std::io::Result<()> {
-        let end = pos.checked_add(out.len() as u64).ok_or_else(|| std::io::Error::other("overflow"))?;
+        let end = pos
+            .checked_add(out.len() as u64)
+            .ok_or_else(|| std::io::Error::other("overflow"))?;
         if end > self.len {
             return Err(std::io::Error::other("read past end"));
         }
@@ -954,16 +1124,27 @@ fn read_exact_at(f: &File, mut pos: u64, mut out: &mut [u8]) -> std::io::Result<
     Ok(())
 }
 
-unsafe extern "C" fn get_block(param: *mut c_void, pos: c_ulong, buf: *mut c_uchar, size: c_ulong) -> c_int {
+unsafe extern "C" fn get_block(
+    param: *mut c_void,
+    pos: c_ulong,
+    buf: *mut c_uchar,
+    size: c_ulong,
+) -> c_int {
     if param.is_null() || buf.is_null() {
         return 0;
     }
     // SAFETY: `param` is the boxed Access set up in Access::new, alive while the
     // document is open; PDFium guarantees `buf` holds `size` bytes.
     let (access, out) = unsafe {
-        (&mut *(param as *mut Access), std::slice::from_raw_parts_mut(buf, size as usize))
+        (
+            &mut *(param as *mut Access),
+            std::slice::from_raw_parts_mut(buf, size as usize),
+        )
     };
-    match access.read_at(pos as u64, out) {
+    // `pos` is c_ulong: 32-bit on Windows, 64-bit elsewhere.
+    #[allow(clippy::useless_conversion)]
+    let pos = u64::from(pos);
+    match access.read_at(pos, out) {
         Ok(()) => 1,
         Err(e) => {
             log::warn!("read of {size} bytes at {pos} failed: {e}");
@@ -986,7 +1167,10 @@ struct Writer {
 impl Writer {
     fn new(file: File) -> Self {
         Self {
-            fw: FPDF_FILEWRITE { version: 1, WriteBlock: Some(write_block) },
+            fw: FPDF_FILEWRITE {
+                version: 1,
+                WriteBlock: Some(write_block),
+            },
             out: Some(BufWriter::with_capacity(1 << 20, file)),
             error: None,
         }
@@ -996,13 +1180,20 @@ impl Writer {
         if let Some(e) = self.error.take() {
             return Err(e);
         }
-        let w = self.out.take().ok_or_else(|| std::io::Error::other("already finished"))?;
+        let w = self
+            .out
+            .take()
+            .ok_or_else(|| std::io::Error::other("already finished"))?;
         let f = w.into_inner().map_err(|e| e.into_error())?;
         f.sync_all()
     }
 }
 
-unsafe extern "C" fn write_block(this: *mut FPDF_FILEWRITE, data: *const c_void, size: c_ulong) -> c_int {
+unsafe extern "C" fn write_block(
+    this: *mut FPDF_FILEWRITE,
+    data: *const c_void,
+    size: c_ulong,
+) -> c_int {
     if this.is_null() || (data.is_null() && size > 0) {
         return 0;
     }
@@ -1033,7 +1224,7 @@ unsafe extern "C" fn write_block(this: *mut FPDF_FILEWRITE, data: *const c_void,
 /// Calls a PDFium "fill this UTF-16 buffer" function twice (size, then data).
 fn utf16_buffer(mut f: impl FnMut(*mut c_void, c_ulong) -> c_ulong) -> Option<String> {
     let n = f(null_mut(), 0) as usize;
-    if n < 2 || n > 1 << 24 {
+    if !(2..=1 << 24).contains(&n) {
         return None;
     }
     let mut buf = vec![0u16; n.div_ceil(2)];
@@ -1050,19 +1241,26 @@ fn annot_string(lib: &dyn PdfiumLibraryBindings, a: FPDF_ANNOTATION, key: &str) 
     let n =
         // SAFETY: NULL buffer asks for the size.
         unsafe { lib.FPDFAnnot_GetStringValue(a, key, null_mut(), 0) } as usize;
-    if n < 2 || n > 1 << 24 {
+    if !(2..=1 << 24).contains(&n) {
         return None;
     }
     let mut buf: Vec<FPDF_WCHAR> = vec![0; n.div_ceil(2)];
     // SAFETY: the buffer has the size PDFium asked for.
-    let got = unsafe { lib.FPDFAnnot_GetStringValue(a, key, buf.as_mut_ptr(), (buf.len() * 2) as c_ulong) } as usize;
+    let got = unsafe {
+        lib.FPDFAnnot_GetStringValue(a, key, buf.as_mut_ptr(), (buf.len() * 2) as c_ulong)
+    } as usize;
     let units = (got / 2).min(buf.len());
     let s = String::from_utf16_lossy(&buf[..units]);
     let s = s.trim_end_matches('\0').to_string();
     (!s.is_empty()).then_some(s)
 }
 
-fn set_annot_string(lib: &dyn PdfiumLibraryBindings, a: FPDF_ANNOTATION, key: &str, value: &str) -> EResult<()> {
+fn set_annot_string(
+    lib: &dyn PdfiumLibraryBindings,
+    a: FPDF_ANNOTATION,
+    key: &str,
+    value: &str,
+) -> EResult<()> {
     let w: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
     // SAFETY: NUL-terminated UTF-16 buffer alive for the call.
     if unsafe { lib.FPDFAnnot_SetStringValue(a, key, w.as_ptr()) } == 0 {
@@ -1094,11 +1292,17 @@ fn read_text(lib: &dyn PdfiumLibraryBindings, tp: FPDF_TEXTPAGE) -> PageText {
         let rect = if generated || ch == '\r' || ch == '\n' {
             None
         } else {
-            let mut r = FS_RECTF { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+            let mut r = FS_RECTF {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            };
             let ok = unsafe { lib.FPDFText_GetLooseCharBox(tp, i, &mut r) } != 0;
             let (l, rr) = (r.left.min(r.right), r.left.max(r.right));
             let (b, t) = (r.bottom.min(r.top), r.bottom.max(r.top));
-            (ok && rr > l && t > b && [l, b, rr, t].iter().all(|v| v.is_finite())).then_some([l, b, rr, t])
+            (ok && rr > l && t > b && [l, b, rr, t].iter().all(|v| v.is_finite()))
+                .then_some([l, b, rr, t])
         };
         chars.push(TextChar { ch, rect });
         i += step;
@@ -1106,7 +1310,11 @@ fn read_text(lib: &dyn PdfiumLibraryBindings, tp: FPDF_TEXTPAGE) -> PageText {
     PageText { chars }
 }
 
-fn dest_target(lib: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT, dest: FPDF_DEST) -> Option<(u32, Option<f32>)> {
+fn dest_target(
+    lib: &dyn PdfiumLibraryBindings,
+    doc: FPDF_DOCUMENT,
+    dest: FPDF_DEST,
+) -> Option<(u32, Option<f32>)> {
     if dest.is_null() {
         return None;
     }
@@ -1118,12 +1326,18 @@ fn dest_target(lib: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT, dest: FPDF_D
     let (mut hx, mut hy, mut hz) = (0, 0, 0);
     let (mut x, mut y, mut z) = (0.0f32, 0.0f32, 0.0f32);
     // SAFETY: valid destination and out pointers.
-    let ok = unsafe { lib.FPDFDest_GetLocationInPage(dest, &mut hx, &mut hy, &mut hz, &mut x, &mut y, &mut z) };
+    let ok = unsafe {
+        lib.FPDFDest_GetLocationInPage(dest, &mut hx, &mut hy, &mut hz, &mut x, &mut y, &mut z)
+    };
     let y = (ok != 0 && hy != 0 && y.is_finite()).then_some(y);
     Some((page as u32, y))
 }
 
-fn action_target(lib: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT, action: FPDF_ACTION) -> Option<LinkTarget> {
+fn action_target(
+    lib: &dyn PdfiumLibraryBindings,
+    doc: FPDF_DOCUMENT,
+    action: FPDF_ACTION,
+) -> Option<LinkTarget> {
     if action.is_null() {
         return None;
     }
@@ -1137,12 +1351,17 @@ fn action_target(lib: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT, action: FP
         PDFACTION_URI => {
             // SAFETY: size query, then a buffer of that size.
             let n = unsafe { lib.FPDFAction_GetURIPath(doc, action, null_mut(), 0) } as usize;
-            if n < 2 || n > 1 << 16 {
+            if !(2..=1 << 16).contains(&n) {
                 return None;
             }
             let mut buf = vec![0u8; n];
-            unsafe { lib.FPDFAction_GetURIPath(doc, action, buf.as_mut_ptr().cast(), n as c_ulong) };
-            let s = String::from_utf8_lossy(&buf).trim_end_matches('\0').trim().to_string();
+            unsafe {
+                lib.FPDFAction_GetURIPath(doc, action, buf.as_mut_ptr().cast(), n as c_ulong)
+            };
+            let s = String::from_utf8_lossy(&buf)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string();
             (!s.is_empty()).then_some(LinkTarget::Uri(s))
         }
         _ => None,
@@ -1158,12 +1377,22 @@ fn read_links(lib: &dyn PdfiumLibraryBindings, doc: FPDF_DOCUMENT, page: FPDF_PA
         if link.is_null() || out.len() > 10_000 {
             break;
         }
-        let mut r = FS_RECTF { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+        let mut r = FS_RECTF {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        };
         // SAFETY: valid link handle.
         if unsafe { lib.FPDFLink_GetAnnotRect(link, &mut r) } == 0 {
             continue;
         }
-        let rect = [r.left.min(r.right), r.bottom.min(r.top), r.left.max(r.right), r.bottom.max(r.top)];
+        let rect = [
+            r.left.min(r.right),
+            r.bottom.min(r.top),
+            r.left.max(r.right),
+            r.bottom.max(r.top),
+        ];
         // SAFETY: valid handles.
         let dest = unsafe { lib.FPDFLink_GetDest(doc, link) };
         let target = dest_target(lib, doc, dest)
@@ -1206,17 +1435,29 @@ fn read_annots(lib: &dyn PdfiumLibraryBindings, page: FPDF_PAGE) -> Vec<AnnotInf
             _ => Some(AnnotKind::Other),
         };
         if let Some(kind) = kind {
-            let mut r = FS_RECTF { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+            let mut r = FS_RECTF {
+                left: 0.0,
+                top: 0.0,
+                right: 0.0,
+                bottom: 0.0,
+            };
             let has_rect = unsafe { lib.FPDFAnnot_GetRect(a, &mut r) } != 0;
             let (mut cr, mut cg, mut cb, mut ca) = (0u32, 0u32, 0u32, 0u32);
-            let color = (unsafe { lib.FPDFAnnot_GetColor(a, COLORTYPE_COLOR as _, &mut cr, &mut cg, &mut cb, &mut ca) } != 0)
+            let color = (unsafe {
+                lib.FPDFAnnot_GetColor(a, COLORTYPE_COLOR as _, &mut cr, &mut cg, &mut cb, &mut ca)
+            } != 0)
                 .then_some([cr.min(255) as u8, cg.min(255) as u8, cb.min(255) as u8]);
             if has_rect {
                 out.push(AnnotInfo {
                     index: i as usize,
                     name: annot_string(lib, a, "NM"),
                     kind,
-                    rect: [r.left.min(r.right), r.bottom.min(r.top), r.left.max(r.right), r.bottom.max(r.top)],
+                    rect: [
+                        r.left.min(r.right),
+                        r.bottom.min(r.top),
+                        r.left.max(r.right),
+                        r.bottom.max(r.top),
+                    ],
                     contents: annot_string(lib, a, "Contents").unwrap_or_default(),
                     author: annot_string(lib, a, "T").unwrap_or_default(),
                     color,
@@ -1298,7 +1539,10 @@ fn unique_name() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("bdf-{nanos:x}-{:x}", COUNTER.fetch_add(1, Ordering::Relaxed))
+    format!(
+        "bdf-{nanos:x}-{:x}",
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// Current UTC time as a PDF date string.
@@ -1325,7 +1569,14 @@ pub fn civil_from_unix(t: i64) -> (i64, u32, u32, u32, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d, (rem / 3600) as u32, ((rem % 3600) / 60) as u32, (rem % 60) as u32)
+    (
+        y,
+        m,
+        d,
+        (rem / 3600) as u32,
+        ((rem % 3600) / 60) as u32,
+        (rem % 60) as u32,
+    )
 }
 
 /// "D:20230102030405+01'00'" -> "2023-01-02 03:04:05 +01:00". Unparseable
@@ -1352,7 +1603,11 @@ pub fn format_pdf_date(s: &str) -> String {
     } else if let Some(sign) = tz.chars().next().filter(|c| *c == '+' || *c == '-') {
         let tzd: String = tz[1..].chars().filter(|c| c.is_ascii_digit()).collect();
         if tzd.len() >= 2 {
-            out.push_str(&format!(" {sign}{}:{}", &tzd[0..2], tzd.get(2..4).unwrap_or("00")));
+            out.push_str(&format!(
+                " {sign}{}:{}",
+                &tzd[0..2],
+                tzd.get(2..4).unwrap_or("00")
+            ));
         }
     }
     out
@@ -1364,9 +1619,15 @@ mod tests {
 
     #[test]
     fn dates() {
-        assert_eq!(format_pdf_date("D:20230102030405+01'00'"), "2023-01-02 03:04:05 +01:00");
+        assert_eq!(
+            format_pdf_date("D:20230102030405+01'00'"),
+            "2023-01-02 03:04:05 +01:00"
+        );
         assert_eq!(format_pdf_date("D:2023"), "2023-01-01 00:00:00");
-        assert_eq!(format_pdf_date("D:20230102030405Z"), "2023-01-02 03:04:05 UTC");
+        assert_eq!(
+            format_pdf_date("D:20230102030405Z"),
+            "2023-01-02 03:04:05 UTC"
+        );
         assert_eq!(format_pdf_date("garbage"), "garbage");
         assert_eq!(civil_from_unix(0), (1970, 1, 1, 0, 0, 0));
         assert_eq!(civil_from_unix(951_782_400), (2000, 2, 29, 0, 0, 0));

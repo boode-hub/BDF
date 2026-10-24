@@ -12,8 +12,8 @@ use bdf_core::settings::{DataDir, Settings, ThemePref, UserBookmark, ZoomPref};
 use bdf_core::text::SearchOptions;
 use bdf_core::worker::{Request, Response, WorkerHandle};
 use eframe::egui::{
-    self, Color32, ColorImage, Context, CornerRadius, Id, Key, KeyboardShortcut, Modifiers, Rect, TextureHandle,
-    TextureOptions, ViewportCommand, pos2, vec2,
+    self, Color32, ColorImage, Context, CornerRadius, Id, Key, KeyboardShortcut, Modifiers, Rect,
+    TextureHandle, TextureOptions, ViewportCommand, pos2, vec2,
 };
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -63,18 +63,44 @@ pub enum NoteTarget {
 }
 
 pub enum Dialog {
-    Password { doc: DocId, path: PathBuf, pane: usize, input: String, error: Option<String> },
-    Note { doc: DocId, page: u32, target: NoteTarget, text: String },
+    Password {
+        path: PathBuf,
+        pane: usize,
+        input: String,
+        error: Option<String>,
+    },
+    Note {
+        doc: DocId,
+        page: u32,
+        target: NoteTarget,
+        text: String,
+    },
     OpenUri(String),
-    ConfirmClose { doc: DocId },
+    ConfirmClose {
+        doc: DocId,
+    },
     ConfirmQuit,
-    ConfirmDelete { doc: DocId, page: u32, info: AnnotInfo },
+    ConfirmDelete {
+        doc: DocId,
+        page: u32,
+        info: AnnotInfo,
+    },
     Properties(DocId),
     Settings,
     Shortcuts,
     About,
-    Error { title: String, text: String },
-    Print { doc: DocId, ranges: String, copies: u32, error: Option<String> },
+    Error {
+        title: String,
+        text: String,
+    },
+    /// macOS and Linux only; Windows uses the system print dialog.
+    #[cfg_attr(windows, allow(dead_code))]
+    Print {
+        doc: DocId,
+        ranges: String,
+        copies: u32,
+        error: Option<String>,
+    },
 }
 
 #[derive(Default)]
@@ -88,17 +114,29 @@ pub struct FindBar {
 
 struct PendingOpen {
     path: PathBuf,
-    password: Option<String>,
     pane: usize,
 }
 
 enum Edit {
-    Add { doc: DocId, page: u32, annot: NewAnnot, redo: bool },
-    Remove { doc: DocId, page: u32, undo: Option<AddedAnnot> },
-    Text { doc: DocId, page: u32 },
+    Add {
+        doc: DocId,
+        page: u32,
+        annot: NewAnnot,
+        redo: bool,
+    },
+    Remove {
+        doc: DocId,
+        page: u32,
+        undo: Option<AddedAnnot>,
+    },
+    Text {
+        doc: DocId,
+        page: u32,
+    },
 }
 
 /// Results of jobs run on the engine thread (printing).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum JobResult {
     Printed(Result<u32, String>),
 }
@@ -117,7 +155,6 @@ pub struct BdfApp {
     last_settings_save: Instant,
     pub worker: Option<WorkerHandle>,
     pub engine_error: Option<String>,
-    pub engine_path: String,
     pub docs: HashMap<DocId, DocState>,
     pub panes: Vec<Pane>,
     pub active_pane: usize,
@@ -165,7 +202,12 @@ pub struct StartOptions {
 }
 
 impl BdfApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, data: DataDir, settings: Settings, opts: StartOptions) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        data: DataDir,
+        settings: Settings,
+        opts: StartOptions,
+    ) -> Self {
         let ctx = cc.egui_ctx.clone();
         theme::install_fonts(&ctx);
         theme::apply_both(&ctx);
@@ -175,17 +217,19 @@ impl BdfApp {
             ThemePref::Dark => egui::ThemePreference::Dark,
         });
         let repaint = ctx.clone();
-        let (worker, engine_error, engine_path) = match WorkerHandle::spawn(
-            || bdf_core::pdfium::PdfiumEngine::load().map(|e| {
-                log::info!("PDFium loaded from {}", e.library_path);
-                Box::new(e) as Box<dyn bdf_core::engine::Engine>
-            }),
+        let (worker, engine_error) = match WorkerHandle::spawn(
+            || {
+                bdf_core::pdfium::PdfiumEngine::load().map(|e| {
+                    log::info!("PDFium loaded from {}", e.library_path);
+                    Box::new(e) as Box<dyn bdf_core::engine::Engine>
+                })
+            },
             Box::new(move || repaint.request_repaint()),
         ) {
-            Ok(w) => (Some(w), None, String::new()),
+            Ok(w) => (Some(w), None),
             Err(e) => {
                 log::error!("engine failed to start: {e}");
-                (None, Some(e), String::new())
+                (None, Some(e))
             }
         };
         let (jobs_tx, jobs_rx) = mpsc::channel();
@@ -197,7 +241,6 @@ impl BdfApp {
             last_settings_save: Instant::now(),
             worker,
             engine_error,
-            engine_path,
             docs: HashMap::new(),
             panes: vec![Pane::default()],
             active_pane: 0,
@@ -255,7 +298,11 @@ impl BdfApp {
         if error {
             log::warn!("{text}");
         }
-        self.toasts.push(Toast { text, error, until: now + if error { 8.0 } else { 3.0 } });
+        self.toasts.push(Toast {
+            text,
+            error,
+            until: now + if error { 8.0 } else { 3.0 },
+        });
         if self.toasts.len() > 5 {
             self.toasts.remove(0);
         }
@@ -293,7 +340,10 @@ impl BdfApp {
     }
 
     pub fn active_view_mut(&mut self) -> Option<&mut ViewState> {
-        self.panes.get_mut(self.active_pane)?.current_mut().map(|t| &mut t.view)
+        self.panes
+            .get_mut(self.active_pane)?
+            .current_mut()
+            .map(|t| &mut t.view)
     }
 
     fn new_view(&self) -> ViewState {
@@ -309,14 +359,27 @@ impl BdfApp {
         let pane = pane.min(self.panes.len() - 1);
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         // Already open: show it.
-        if let Some((&id, _)) = self.docs.iter().find(|(_, d)| d.path == canonical || d.path == path) {
+        if let Some((&id, _)) = self
+            .docs
+            .iter()
+            .find(|(_, d)| d.path == canonical || d.path == path)
+        {
             if let Some(i) = self.panes[pane].tabs.iter().position(|t| t.doc == id) {
                 self.panes[pane].active = i;
             } else {
                 let mut view = self.new_view();
-                if let Some(t) = self.panes.iter().flat_map(|p| p.tabs.iter()).find(|t| t.doc == id) {
+                if let Some(t) = self
+                    .panes
+                    .iter()
+                    .flat_map(|p| p.tabs.iter())
+                    .find(|t| t.doc == id)
+                {
                     view.current_page = t.view.current_page;
-                    view.pending = Some(Jump { page: t.view.current_page, y_user: None, rect_user: None });
+                    view.pending = Some(Jump {
+                        page: t.view.current_page,
+                        y_user: None,
+                        rect_user: None,
+                    });
                 }
                 self.panes[pane].tabs.push(Tab { doc: id, view });
                 self.panes[pane].active = self.panes[pane].tabs.len() - 1;
@@ -333,8 +396,12 @@ impl BdfApp {
     fn request_open(&mut self, path: PathBuf, password: Option<String>, pane: usize) {
         let Some(worker) = &self.worker else { return };
         let doc = worker.alloc_doc_id();
-        worker.send(Request::Open { doc, path: path.clone(), password: password.clone() });
-        self.pending_opens.insert(doc, PendingOpen { path, password, pane });
+        worker.send(Request::Open {
+            doc,
+            path: path.clone(),
+            password,
+        });
+        self.pending_opens.insert(doc, PendingOpen { path, pane });
     }
 
     pub fn open_with_password(&mut self, path: PathBuf, password: String, pane: usize) {
@@ -355,7 +422,9 @@ impl BdfApp {
     }
 
     pub fn open_dialog(&mut self, pane: usize) {
-        let mut d = rfd::FileDialog::new().add_filter("PDF documents", &["pdf", "PDF"]).add_filter("All files", &["*"]);
+        let mut d = rfd::FileDialog::new()
+            .add_filter("PDF documents", &["pdf", "PDF"])
+            .add_filter("All files", &["*"]);
         if let Some(dir) = self.settings.recent.first().and_then(|r| r.path.parent()) {
             d = d.set_directory(dir);
         }
@@ -376,9 +445,17 @@ impl BdfApp {
 
     /// Closes a tab. Unsaved changes prompt unless `force`.
     pub fn close_tab(&mut self, pane: usize, index: usize, force: bool) {
-        let Some(tab) = self.panes.get(pane).and_then(|p| p.tabs.get(index)) else { return };
+        let Some(tab) = self.panes.get(pane).and_then(|p| p.tabs.get(index)) else {
+            return;
+        };
         let doc = tab.doc;
-        let others = self.panes.iter().flat_map(|p| p.tabs.iter()).filter(|t| t.doc == doc).count() > 1;
+        let others = self
+            .panes
+            .iter()
+            .flat_map(|p| p.tabs.iter())
+            .filter(|t| t.doc == doc)
+            .count()
+            > 1;
         if !force && !others && self.docs.get(&doc).is_some_and(|d| d.dirty) {
             self.panes[pane].active = index;
             self.active_pane = pane;
@@ -405,11 +482,10 @@ impl BdfApp {
     /// Closes every tab of a document (used after "Don't save").
     pub fn close_doc_everywhere(&mut self, doc: DocId) {
         loop {
-            let found = self
-                .panes
-                .iter()
-                .enumerate()
-                .find_map(|(pi, p)| p.tabs.iter().position(|t| t.doc == doc).map(|ti| (pi, ti)));
+            let found =
+                self.panes.iter().enumerate().find_map(|(pi, p)| {
+                    p.tabs.iter().position(|t| t.doc == doc).map(|ti| (pi, ti))
+                });
             match found {
                 Some((pi, ti)) => self.close_tab(pi, ti, true),
                 None => break,
@@ -450,7 +526,11 @@ impl BdfApp {
                 view.rotation = t.view.rotation;
                 view.mode = t.view.mode;
                 view.current_page = t.view.current_page;
-                view.pending = Some(Jump { page: t.view.current_page, y_user: None, rect_user: None });
+                view.pending = Some(Jump {
+                    page: t.view.current_page,
+                    y_user: None,
+                    rect_user: None,
+                });
                 pane.tabs.push(Tab { doc: t.doc, view });
             }
             self.panes.push(pane);
@@ -486,7 +566,8 @@ impl BdfApp {
     fn pump(&mut self, ctx: &Context) {
         let Some(worker) = &self.worker else { return };
         if !worker.is_alive() && self.engine_error.is_none() {
-            self.engine_error = Some("The PDF engine stopped unexpectedly. Save your work and restart BDF.".into());
+            self.engine_error =
+                Some("The PDF engine stopped unexpectedly. Save your work and restart BDF.".into());
         }
         let deadline = Instant::now() + Duration::from_millis(10);
         let mut batch = Vec::new();
@@ -506,8 +587,12 @@ impl BdfApp {
         }
         while let Ok(j) = self.jobs_rx.try_recv() {
             match j {
-                JobResult::Printed(Ok(n)) => self.toast(ctx, format!("Sent {n} page(s) to the printer"), false),
-                JobResult::Printed(Err(e)) => self.toast(ctx, format!("Printing failed: {e}"), true),
+                JobResult::Printed(Ok(n)) => {
+                    self.toast(ctx, format!("Sent {n} page(s) to the printer"), false)
+                }
+                JobResult::Printed(Err(e)) => {
+                    self.toast(ctx, format!("Printing failed: {e}"), true)
+                }
             }
         }
     }
@@ -516,7 +601,10 @@ impl BdfApp {
         match r {
             Response::Tile { key, result } => match result {
                 Ok(img) => {
-                    let current = self.docs.get(&key.doc).is_some_and(|d| d.generation(key.page) == key.generation);
+                    let current = self
+                        .docs
+                        .get(&key.doc)
+                        .is_some_and(|d| d.generation(key.page) == key.generation);
                     if current {
                         self.tiles.insert(ctx, key, img);
                     }
@@ -527,16 +615,23 @@ impl BdfApp {
                 }
             },
             Response::Opened { doc, result } => {
-                let Some(p) = self.pending_opens.remove(&doc) else { return };
+                let Some(p) = self.pending_opens.remove(&doc) else {
+                    return;
+                };
                 match result {
                     Ok(info) => {
-                        let ds = DocState::new(doc, *info, p.password.clone());
+                        let ds = DocState::new(doc, *info);
                         let fp = ds.info.fingerprint.clone();
                         let pages = ds.page_count();
                         self.settings.touch_recent(&p.path);
                         let mut page = 0;
                         if self.settings.remember_page {
-                            page = self.settings.docs.get(&fp).map(|m| m.last_page as usize).unwrap_or(0);
+                            page = self
+                                .settings
+                                .docs
+                                .get(&fp)
+                                .map(|m| m.last_page as usize)
+                                .unwrap_or(0);
                         }
                         if let Some(sp) = self.start_page.take() {
                             page = sp.saturating_sub(1);
@@ -545,7 +640,11 @@ impl BdfApp {
                         self.settings_changed = true;
                         let mut view = self.new_view();
                         view.current_page = page.min(pages.saturating_sub(1));
-                        view.pending = Some(Jump { page: view.current_page, y_user: None, rect_user: None });
+                        view.pending = Some(Jump {
+                            page: view.current_page,
+                            y_user: None,
+                            rect_user: None,
+                        });
                         self.docs.insert(doc, ds);
                         let pane = p.pane.min(self.panes.len() - 1);
                         self.panes[pane].tabs.push(Tab { doc, view });
@@ -553,19 +652,28 @@ impl BdfApp {
                         self.active_pane = pane;
                         log::info!("opened {} ({pages} pages)", p.path.display());
                     }
-                    Err(OpenError::PasswordRequired) => {
-                        self.show_dialog(Dialog::Password { doc, path: p.path, pane: p.pane, input: String::new(), error: None })
-                    }
+                    Err(OpenError::PasswordRequired) => self.show_dialog(Dialog::Password {
+                        path: p.path,
+                        pane: p.pane,
+                        input: String::new(),
+                        error: None,
+                    }),
                     Err(OpenError::WrongPassword) => self.show_dialog(Dialog::Password {
-                        doc,
                         path: p.path,
                         pane: p.pane,
                         input: String::new(),
                         error: Some("That password is not correct.".into()),
                     }),
                     Err(e) => {
-                        let name = p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        self.show_dialog(Dialog::Error { title: format!("Could not open {name}"), text: e.to_string() });
+                        let name = p
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.show_dialog(Dialog::Error {
+                            title: format!("Could not open {name}"),
+                            text: e.to_string(),
+                        });
                     }
                 }
             }
@@ -582,7 +690,10 @@ impl BdfApp {
             }
             Response::Region { req, image } => {
                 if let Ok(img) = image {
-                    let color = ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba);
+                    let color = ColorImage::from_rgba_unmultiplied(
+                        [img.width as usize, img.height as usize],
+                        &img.rgba,
+                    );
                     match &mut self.magnifier {
                         Some((r, tex)) => {
                             tex.set(color, TextureOptions::LINEAR);
@@ -597,40 +708,72 @@ impl BdfApp {
             }
             Response::SearchHits { doc, ticket, hits } => {
                 let mut jump = None;
-                if let Some(d) = self.docs.get_mut(&doc) {
-                    if let Some(s) = d.search.as_mut().filter(|s| s.ticket == ticket) {
-                        let first = s.hits.is_empty() && s.current.is_none();
-                        s.add_hits(hits);
-                        if first {
-                            s.current = Some(0);
-                            jump = s.hits.first().cloned();
-                        }
+                if let Some(d) = self.docs.get_mut(&doc)
+                    && let Some(s) = d.search.as_mut().filter(|s| s.ticket == ticket)
+                {
+                    let first = s.hits.is_empty() && s.current.is_none();
+                    s.add_hits(hits);
+                    if first {
+                        s.current = Some(0);
+                        jump = s.hits.first().cloned();
                     }
                 }
                 if let Some(h) = jump {
                     self.jump_to_hit(doc, h.page, h.rects.first().copied(), true);
                 }
             }
-            Response::SearchProgress { doc, ticket, searched, total, done } => {
-                if let Some(s) = self.docs.get_mut(&doc).and_then(|d| d.search.as_mut()).filter(|s| s.ticket == ticket) {
+            Response::SearchProgress {
+                doc,
+                ticket,
+                searched,
+                total,
+                done,
+            } => {
+                if let Some(s) = self
+                    .docs
+                    .get_mut(&doc)
+                    .and_then(|d| d.search.as_mut())
+                    .filter(|s| s.ticket == ticket)
+                {
                     s.searched = searched;
                     s.total = total;
                     s.done = done;
                 }
             }
-            Response::Annots { doc, ticket, page, annots, done } => {
-                if let Some(d) = self.docs.get_mut(&doc) {
-                    if d.annots.ticket == ticket {
-                        d.annots.items.extend(annots.into_iter().map(|a| (page, a)));
-                        d.annots.pages_done = page + 1;
-                        d.annots.complete = done;
-                    }
+            Response::Annots {
+                doc,
+                ticket,
+                page,
+                annots,
+                done,
+            } => {
+                if let Some(d) = self.docs.get_mut(&doc)
+                    && d.annots.ticket == ticket
+                {
+                    d.annots.items.extend(annots.into_iter().map(|a| (page, a)));
+                    d.annots.pages_done = page + 1;
+                    d.annots.complete = done;
                 }
             }
-            Response::AnnotEdited { doc: _, page: _, ticket, result } => {
-                let Some(edit) = self.edits.remove(&ticket) else { return };
+            Response::AnnotEdited {
+                doc: _,
+                page: _,
+                ticket,
+                result,
+            } => {
+                let Some(edit) = self.edits.remove(&ticket) else {
+                    return;
+                };
                 match (edit, result) {
-                    (Edit::Add { doc, page, annot, redo }, Ok(name)) => {
+                    (
+                        Edit::Add {
+                            doc,
+                            page,
+                            annot,
+                            redo,
+                        },
+                        Ok(name),
+                    ) => {
                         if let Some(d) = self.docs.get_mut(&doc) {
                             d.bump(page);
                             d.dirty = true;
@@ -662,12 +805,22 @@ impl BdfApp {
                             d.dirty = true;
                         }
                     }
-                    (_, Err(e)) => self.toast(ctx, format!("Could not change the annotation: {e}"), true),
+                    (_, Err(e)) => {
+                        self.toast(ctx, format!("Could not change the annotation: {e}"), true)
+                    }
                 }
             }
-            Response::Saved { doc, ticket, target, result } => {
+            Response::Saved {
+                doc,
+                ticket,
+                target,
+                result,
+            } => {
                 self.saves.remove(&ticket);
-                let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = target
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 match result {
                     Ok(()) => {
                         if let Some(d) = self.docs.get_mut(&doc) {
@@ -677,7 +830,10 @@ impl BdfApp {
                         }
                         self.settings.touch_recent(&target);
                         self.toast(ctx, format!("Saved {name}"), false);
-                        if self.quit_after_save && self.saves.is_empty() && !self.docs.values().any(|d| d.dirty) {
+                        if self.quit_after_save
+                            && self.saves.is_empty()
+                            && !self.docs.values().any(|d| d.dirty)
+                        {
                             self.allow_close = true;
                             ctx.send_viewport_cmd(ViewportCommand::Close);
                         }
@@ -687,11 +843,16 @@ impl BdfApp {
                             d.saving = false;
                         }
                         self.quit_after_save = false;
-                        self.show_dialog(Dialog::Error { title: format!("Could not save {name}"), text: e });
+                        self.show_dialog(Dialog::Error {
+                            title: format!("Could not save {name}"),
+                            text: e,
+                        });
                     }
                 }
             }
-            Response::Fault(msg) => self.toast(ctx, format!("Internal error (recovered): {msg}"), true),
+            Response::Fault(msg) => {
+                self.toast(ctx, format!("Internal error (recovered): {msg}"), true)
+            }
         }
     }
 
@@ -701,7 +862,14 @@ impl BdfApp {
     pub fn jump_to_hit(&mut self, doc: DocId, page: u32, rect: Option<[f32; 4]>, remember: bool) {
         let pane = &mut self.panes[self.active_pane];
         if let Some(t) = pane.current_mut().filter(|t| t.doc == doc) {
-            t.view.jump(Jump { page: page as usize, y_user: None, rect_user: rect }, remember);
+            t.view.jump(
+                Jump {
+                    page: page as usize,
+                    y_user: None,
+                    rect_user: rect,
+                },
+                remember,
+            );
         }
         // Make sure the geometry for precise scrolling arrives.
         if let (Some(d), Some(w)) = (self.docs.get_mut(&doc), &self.worker) {
@@ -717,13 +885,18 @@ impl BdfApp {
         let pane = &self.panes[self.active_pane];
         let Some(tab) = pane.current() else { return };
         let start = tab.view.current_page as u32;
-        let Some(d) = self.docs.get_mut(&tab.doc) else { return };
+        let Some(d) = self.docs.get_mut(&tab.doc) else {
+            return;
+        };
         worker.send(Request::CancelSearch { doc: d.id });
         if query.is_empty() {
             d.search = None;
             return;
         }
-        if d.search.as_ref().is_some_and(|s| s.query == query && s.opts == opts) {
+        if d.search
+            .as_ref()
+            .is_some_and(|s| s.query == query && s.opts == opts)
+        {
             return;
         }
         d.search = Some(SearchState {
@@ -736,7 +909,13 @@ impl BdfApp {
             total: d.page_count() as u32,
             done: false,
         });
-        worker.send(Request::Search { doc: d.id, ticket, query, opts, start_page: start });
+        worker.send(Request::Search {
+            doc: d.id,
+            ticket,
+            query,
+            opts,
+            start_page: start,
+        });
     }
 
     pub fn find_step(&mut self, forward: bool) {
@@ -746,7 +925,9 @@ impl BdfApp {
         }
         let Some(tab) = self.active_tab() else { return };
         let (doc, from) = (tab.doc, tab.view.current_page as u32);
-        let Some(d) = self.docs.get_mut(&doc) else { return };
+        let Some(d) = self.docs.get_mut(&doc) else {
+            return;
+        };
         let Some(s) = d.search.as_mut() else { return };
         if let Some(i) = s.step(forward, from) {
             let h = s.hits[i].clone();
@@ -767,15 +948,30 @@ impl BdfApp {
     pub fn add_annot(&mut self, doc: DocId, page: u32, annot: NewAnnot) {
         let ticket = self.ticket();
         if let Some(w) = &self.worker {
-            w.send(Request::AddAnnot { doc, page, annot: annot.clone(), ticket });
-            self.edits.insert(ticket, Edit::Add { doc, page, annot, redo: false });
+            w.send(Request::AddAnnot {
+                doc,
+                page,
+                annot: annot.clone(),
+                ticket,
+            });
+            self.edits.insert(
+                ticket,
+                Edit::Add {
+                    doc,
+                    page,
+                    annot,
+                    redo: false,
+                },
+            );
         }
     }
 
     pub fn delete_annot(&mut self, doc: DocId, page: u32, info: AnnotInfo, confirmed: bool) {
         // Annotations added in this session can be undone, so no prompt.
         let own = self.docs.get(&doc).and_then(|d| {
-            info.name.as_ref().and_then(|n| d.undo.iter().position(|a| &a.name == n))
+            info.name
+                .as_ref()
+                .and_then(|n| d.undo.iter().position(|a| &a.name == n))
         });
         if own.is_none() && !confirmed {
             self.show_dialog(Dialog::ConfirmDelete { doc, page, info });
@@ -784,45 +980,90 @@ impl BdfApp {
         let undo = own.and_then(|i| self.docs.get_mut(&doc).map(|d| d.undo.remove(i)));
         let ticket = self.ticket();
         if let Some(w) = &self.worker {
-            w.send(Request::RemoveAnnot { doc, page, index: info.index, name: info.name.clone(), ticket });
+            w.send(Request::RemoveAnnot {
+                doc,
+                page,
+                index: info.index,
+                name: info.name.clone(),
+                ticket,
+            });
             self.edits.insert(ticket, Edit::Remove { doc, page, undo });
         }
         if let Some(d) = self.docs.get_mut(&doc) {
-            d.annots.items.retain(|(p, a)| !(*p == page && a.index == info.index && a.name == info.name));
+            d.annots
+                .items
+                .retain(|(p, a)| !(*p == page && a.index == info.index && a.name == info.name));
         }
     }
 
     pub fn set_annot_text(&mut self, doc: DocId, page: u32, info: &AnnotInfo, text: String) {
         let ticket = self.ticket();
         if let Some(w) = &self.worker {
-            w.send(Request::SetAnnotText { doc, page, index: info.index, name: info.name.clone(), text, ticket });
+            w.send(Request::SetAnnotText {
+                doc,
+                page,
+                index: info.index,
+                name: info.name.clone(),
+                text,
+                ticket,
+            });
             self.edits.insert(ticket, Edit::Text { doc, page });
         }
     }
 
     pub fn undo(&mut self, ctx: &Context) {
-        let Some(id) = self.active_doc_id() else { return };
+        let Some(id) = self.active_doc_id() else {
+            return;
+        };
         let Some(a) = self.docs.get_mut(&id).and_then(|d| d.undo.pop()) else {
             self.toast(ctx, "Nothing to undo", false);
             return;
         };
         let ticket = self.ticket();
         if let Some(w) = &self.worker {
-            w.send(Request::RemoveAnnot { doc: id, page: a.page, index: usize::MAX, name: Some(a.name.clone()), ticket });
-            self.edits.insert(ticket, Edit::Remove { doc: id, page: a.page, undo: Some(a) });
+            w.send(Request::RemoveAnnot {
+                doc: id,
+                page: a.page,
+                index: usize::MAX,
+                name: Some(a.name.clone()),
+                ticket,
+            });
+            self.edits.insert(
+                ticket,
+                Edit::Remove {
+                    doc: id,
+                    page: a.page,
+                    undo: Some(a),
+                },
+            );
         }
     }
 
     pub fn redo(&mut self, ctx: &Context) {
-        let Some(id) = self.active_doc_id() else { return };
+        let Some(id) = self.active_doc_id() else {
+            return;
+        };
         let Some(a) = self.docs.get_mut(&id).and_then(|d| d.redo.pop()) else {
             self.toast(ctx, "Nothing to redo", false);
             return;
         };
         let ticket = self.ticket();
         if let Some(w) = &self.worker {
-            w.send(Request::AddAnnot { doc: id, page: a.page, annot: a.annot.clone(), ticket });
-            self.edits.insert(ticket, Edit::Add { doc: id, page: a.page, annot: a.annot, redo: true });
+            w.send(Request::AddAnnot {
+                doc: id,
+                page: a.page,
+                annot: a.annot.clone(),
+                ticket,
+            });
+            self.edits.insert(
+                ticket,
+                Edit::Add {
+                    doc: id,
+                    page: a.page,
+                    annot: a.annot,
+                    redo: true,
+                },
+            );
         }
     }
 
@@ -832,7 +1073,9 @@ impl BdfApp {
             return;
         }
         let target = if save_as {
-            let mut dlg = rfd::FileDialog::new().add_filter("PDF documents", &["pdf"]).set_file_name(d.title());
+            let mut dlg = rfd::FileDialog::new()
+                .add_filter("PDF documents", &["pdf"])
+                .set_file_name(d.title());
             if let Some(dir) = d.path.parent() {
                 dlg = dlg.set_directory(dir);
             }
@@ -854,7 +1097,11 @@ impl BdfApp {
         };
         let ticket = self.ticket();
         if let Some(w) = &self.worker {
-            w.send(Request::Save { doc, target, ticket });
+            w.send(Request::Save {
+                doc,
+                target,
+                ticket,
+            });
             self.saves.insert(ticket, doc);
             if let Some(d) = self.docs.get_mut(&doc) {
                 d.saving = true;
@@ -863,7 +1110,9 @@ impl BdfApp {
     }
 
     pub fn print(&mut self, ctx: &Context) {
-        let Some(id) = self.active_doc_id() else { return };
+        let Some(id) = self.active_doc_id() else {
+            return;
+        };
         let Some(d) = self.docs.get(&id) else { return };
         #[cfg(windows)]
         {
@@ -888,13 +1137,19 @@ impl BdfApp {
         {
             let _ = (ctx, &self.jobs_tx);
             let doc = d.id;
-            self.show_dialog(Dialog::Print { doc, ranges: String::new(), copies: 1, error: None });
+            self.show_dialog(Dialog::Print {
+                doc,
+                ranges: String::new(),
+                copies: 1,
+                error: None,
+            });
         }
     }
 
     pub fn add_bookmark(&mut self, ctx: &Context, doc: DocId, page: u32) {
         let Some(d) = self.docs.get(&doc) else { return };
-        let title = outline_title_for(&d.info.outline, page).unwrap_or_else(|| format!("Page {}", d.label(page as usize)));
+        let title = outline_title_for(&d.info.outline, page)
+            .unwrap_or_else(|| format!("Page {}", d.label(page as usize)));
         let fp = d.info.fingerprint.clone();
         let m = self.settings.doc_mut(&fp);
         if m.bookmarks.iter().any(|b| b.page == page) {
@@ -910,7 +1165,10 @@ impl BdfApp {
     pub fn scan_annots(&mut self, doc: DocId) {
         let ticket = self.ticket();
         if let (Some(d), Some(w)) = (self.docs.get_mut(&doc), &self.worker) {
-            d.annots = crate::doc::AnnotIndex { ticket, ..Default::default() };
+            d.annots = crate::doc::AnnotIndex {
+                ticket,
+                ..Default::default()
+            };
             w.send(Request::ScanAnnots { doc, ticket });
         }
     }
@@ -922,24 +1180,33 @@ impl BdfApp {
                 ViewAction::RemoveAnnot { page, info } => self.delete_annot(doc, page, info, false),
                 ViewAction::EditAnnot { page, info } => {
                     let text = info.contents.clone();
-                    self.show_dialog(Dialog::Note { doc, page, target: NoteTarget::Edit(info), text });
+                    self.show_dialog(Dialog::Note {
+                        doc,
+                        page,
+                        target: NoteTarget::Edit(info),
+                        text,
+                    });
                 }
-                ViewAction::NewNote { page, at } => {
-                    self.show_dialog(Dialog::Note { doc, page, target: NoteTarget::New(at), text: String::new() })
-                }
+                ViewAction::NewNote { page, at } => self.show_dialog(Dialog::Note {
+                    doc,
+                    page,
+                    target: NoteTarget::New(at),
+                    text: String::new(),
+                }),
                 ViewAction::OpenUri(u) => self.show_dialog(Dialog::OpenUri(u)),
                 ViewAction::Copy(t) => {
                     ctx.copy_text(t);
                     self.toast(ctx, "Copied", false);
                 }
                 ViewAction::AddBookmark { page } => self.add_bookmark(ctx, doc, page),
-                ViewAction::Toast(t) => self.toast(ctx, t, false),
             }
         }
     }
 
     pub fn copy_selection(&mut self, ctx: &Context) {
-        let text = self.active_mut().and_then(|(d, v)| view::selection_text(d, v));
+        let text = self
+            .active_mut()
+            .and_then(|(d, v)| view::selection_text(d, v));
         if let Some(t) = text {
             ctx.copy_text(t);
             self.toast(ctx, "Copied", false);
@@ -949,21 +1216,34 @@ impl BdfApp {
     /// Applies a markup tool to the current selection (toolbar shortcut).
     pub fn markup_selection(&mut self, kind: bdf_core::engine::AnnotKind) -> bool {
         let color = view::markup_color(kind, self.settings.highlight_color);
-        let Some((d, v)) = self.active_mut() else { return false };
-        let Some(sel) = v.selection.take() else { return false };
+        let Some((d, v)) = self.active_mut() else {
+            return false;
+        };
+        let Some(sel) = v.selection.take() else {
+            return false;
+        };
         let id = d.id;
         let parts = view::selection_rects(d, &sel);
         for (page, rects) in parts {
-            self.add_annot(id, page, NewAnnot::Markup { kind, rects, color, text: String::new() });
+            self.add_annot(
+                id,
+                page,
+                NewAnnot::Markup {
+                    kind,
+                    rects,
+                    color,
+                    text: String::new(),
+                },
+            );
         }
         true
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
-        if let Some(kind) = tool.markup_kind() {
-            if self.markup_selection(kind) {
-                return;
-            }
+        if let Some(kind) = tool.markup_kind()
+            && self.markup_selection(kind)
+        {
+            return;
         }
         self.tool = tool;
     }
@@ -972,7 +1252,10 @@ impl BdfApp {
         if let Some((d, v)) = self.active_mut() {
             let p = v.current_page;
             if let Some(pd) = d.peek_page_data(p as u32) {
-                v.selection = Some(view::TextSel { start: (p, 0), end: (p, pd.text.len()) });
+                v.selection = Some(view::TextSel {
+                    start: (p, 0),
+                    end: (p, pd.text.len()),
+                });
             }
         }
     }
@@ -1036,15 +1319,15 @@ impl BdfApp {
         if take(sc(cmd, Key::O)) {
             self.open_dialog(pane);
         }
-        if take(sc(cs, Key::S)) {
-            if let Some(id) = self.active_doc_id() {
-                self.save(ctx, id, true);
-            }
+        if take(sc(cs, Key::S))
+            && let Some(id) = self.active_doc_id()
+        {
+            self.save(ctx, id, true);
         }
-        if take(sc(cmd, Key::S)) {
-            if let Some(id) = self.active_doc_id() {
-                self.save(ctx, id, false);
-            }
+        if take(sc(cmd, Key::S))
+            && let Some(id) = self.active_doc_id()
+        {
+            self.save(ctx, id, false);
         }
         if take(sc(cmd, Key::P)) {
             self.print(ctx);
@@ -1071,16 +1354,16 @@ impl BdfApp {
         if take(sc(cmd, Key::Z)) {
             self.undo(ctx);
         }
-        if take(sc(cmd, Key::B)) {
-            if let Some(t) = self.active_tab() {
-                let (doc, page) = (t.doc, t.view.current_page as u32);
-                self.add_bookmark(ctx, doc, page);
-            }
+        if take(sc(cmd, Key::B))
+            && let Some(t) = self.active_tab()
+        {
+            let (doc, page) = (t.doc, t.view.current_page as u32);
+            self.add_bookmark(ctx, doc, page);
         }
-        if take(sc(cmd, Key::D)) {
-            if let Some(id) = self.active_doc_id() {
-                self.show_dialog(Dialog::Properties(id));
-            }
+        if take(sc(cmd, Key::D))
+            && let Some(id) = self.active_doc_id()
+        {
+            self.show_dialog(Dialog::Properties(id));
         }
         if take(sc(Modifiers::NONE, Key::F4)) {
             self.settings.sidebar = !self.settings.sidebar;
@@ -1113,55 +1396,56 @@ impl BdfApp {
             self.page_input_focus = true;
         }
         // Zoom.
-        if take(sc(cmd, Key::Plus)) || take(sc(cmd, Key::Equals)) || take(sc(cs, Key::Equals)) {
-            if let Some(v) = self.active_view_mut() {
-                v.zoom_step(1, None);
-            }
+        if (take(sc(cmd, Key::Plus)) || take(sc(cmd, Key::Equals)) || take(sc(cs, Key::Equals)))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.zoom_step(1, None);
         }
-        if take(sc(cmd, Key::Minus)) {
-            if let Some(v) = self.active_view_mut() {
-                v.zoom_step(-1, None);
-            }
+        if take(sc(cmd, Key::Minus))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.zoom_step(-1, None);
         }
-        if take(sc(cmd, Key::Num0)) {
-            if let Some(v) = self.active_view_mut() {
-                v.fit(ZoomMode::FitPage);
-            }
+        if take(sc(cmd, Key::Num0))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.fit(ZoomMode::FitPage);
         }
-        if take(sc(cmd, Key::Num1)) {
-            if let Some(v) = self.active_view_mut() {
-                v.set_zoom(1.0, None, ZoomMode::Custom);
-            }
+        if take(sc(cmd, Key::Num1))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.set_zoom(1.0, None, ZoomMode::Custom);
         }
-        if take(sc(cmd, Key::Num2)) {
-            if let Some(v) = self.active_view_mut() {
-                v.fit(ZoomMode::FitWidth);
-            }
+        if take(sc(cmd, Key::Num2))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.fit(ZoomMode::FitWidth);
         }
-        if take(sc(cs, Key::R)) {
-            if let Some(v) = self.active_view_mut() {
-                v.rotate(false);
-            }
+        if take(sc(cs, Key::R))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.rotate(false);
         }
-        if take(sc(cmd, Key::R)) {
-            if let Some(v) = self.active_view_mut() {
-                v.rotate(true);
-            }
+        if take(sc(cmd, Key::R))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.rotate(true);
         }
-        if take(sc(Modifiers::ALT, Key::ArrowLeft)) {
-            if let Some(v) = self.active_view_mut() {
-                v.go_back();
-            }
+        if take(sc(Modifiers::ALT, Key::ArrowLeft))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.go_back();
         }
-        if take(sc(Modifiers::ALT, Key::ArrowRight)) {
-            if let Some(v) = self.active_view_mut() {
-                v.go_forward();
-            }
+        if take(sc(Modifiers::ALT, Key::ArrowRight))
+            && let Some(v) = self.active_view_mut()
+        {
+            v.go_forward();
         }
-        if take(sc(cmd, Key::C)) || ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))) {
-            if !ctx.egui_wants_keyboard_input() {
-                self.copy_selection(ctx);
-            }
+        if (take(sc(cmd, Key::C))
+            || ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))))
+            && !ctx.egui_wants_keyboard_input()
+        {
+            self.copy_selection(ctx);
         }
         if take(sc(cmd, Key::A)) && !ctx.egui_wants_keyboard_input() {
             self.select_all_on_page();
@@ -1182,10 +1466,16 @@ impl BdfApp {
                 v.selection = None;
                 v.selected_annot = None;
             }
-            self.tool = if matches!(self.tool, Tool::Hand) { Tool::Hand } else { Tool::Select };
+            self.tool = if matches!(self.tool, Tool::Hand) {
+                Tool::Hand
+            } else {
+                Tool::Select
+            };
         }
         if pressed(Key::Delete) || pressed(Key::Backspace) {
-            let sel = self.active_tab().and_then(|t| t.view.selected_annot.clone().map(|a| (t.doc, a)));
+            let sel = self
+                .active_tab()
+                .and_then(|t| t.view.selected_annot.clone().map(|a| (t.doc, a)));
             if let Some((doc, (page, info))) = sel {
                 self.delete_annot(doc, page, info, false);
             }
@@ -1199,8 +1489,14 @@ impl BdfApp {
         if pressed(Key::Z) {
             self.tool = Tool::Magnifier;
         }
-        let n = self.active_tab().and_then(|t| self.docs.get(&t.doc)).map(|d| d.page_count()).unwrap_or(0);
-        let Some(v) = self.active_view_mut() else { return };
+        let n = self
+            .active_tab()
+            .and_then(|t| self.docs.get(&t.doc))
+            .map(|d| d.page_count())
+            .unwrap_or(0);
+        let Some(v) = self.active_view_mut() else {
+            return;
+        };
         let continuous = v.mode.is_continuous();
         if pressed(Key::PageDown) || pressed(Key::Space) {
             v.page_down(1);
@@ -1268,19 +1564,31 @@ impl BdfApp {
             let r = ui.interact(div, Id::unique("split-divider"), egui::Sense::drag());
             let dark = Self::is_dark(ctx);
             let pal = theme::palette(dark);
-            ui.painter().rect_filled(div, CornerRadius::ZERO, if r.hovered() || r.dragged() { pal.accent } else { ui.visuals().widgets.noninteractive.bg_stroke.color });
+            ui.painter().rect_filled(
+                div,
+                CornerRadius::ZERO,
+                if r.hovered() || r.dragged() {
+                    pal.accent
+                } else {
+                    ui.visuals().widgets.noninteractive.bg_stroke.color
+                },
+            );
             if r.hovered() || r.dragged() {
-                ctx.set_cursor_icon(if self.split_vertical { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
+                ctx.set_cursor_icon(if self.split_vertical {
+                    egui::CursorIcon::ResizeVertical
+                } else {
+                    egui::CursorIcon::ResizeHorizontal
+                });
             }
-            if r.dragged() {
-                if let Some(p) = r.interact_pointer_pos() {
-                    self.split_ratio = if self.split_vertical {
-                        (p.y - full.min.y) / full.height()
-                    } else {
-                        (p.x - full.min.x) / full.width()
-                    }
-                    .clamp(0.15, 0.85);
+            if r.dragged()
+                && let Some(p) = r.interact_pointer_pos()
+            {
+                self.split_ratio = if self.split_vertical {
+                    (p.y - full.min.y) / full.height()
+                } else {
+                    (p.x - full.min.x) / full.width()
                 }
+                .clamp(0.15, 0.85);
             }
             vec![a, b]
         };
@@ -1291,12 +1599,13 @@ impl BdfApp {
             }
         }
         // Synchronised scrolling between the two panes.
-        if self.sync_scroll && self.panes.len() == 2 {
-            if let Some(src) = scrolled_pane {
-                let anchor = self.panes[src].current().and_then(|t| t.view.anchor());
-                if let (Some(a), Some(t)) = (anchor, self.panes[1 - src].current_mut()) {
-                    t.view.sync_to = Some(a);
-                }
+        if self.sync_scroll
+            && self.panes.len() == 2
+            && let Some(src) = scrolled_pane
+        {
+            let anchor = self.panes[src].current().and_then(|t| t.view.anchor());
+            if let (Some(a), Some(t)) = (anchor, self.panes[1 - src].current_mut()) {
+                t.view.sync_to = Some(a);
             }
         }
     }
@@ -1316,10 +1625,16 @@ impl BdfApp {
             return false;
         }
         let active = index == self.active_pane;
-        let Some(worker) = self.worker.as_ref() else { return false };
+        let Some(worker) = self.worker.as_ref() else {
+            return false;
+        };
         let pane = &mut self.panes[index];
-        let Some(tab) = pane.tabs.get_mut(pane.active) else { return false };
-        let Some(doc) = self.docs.get_mut(&tab.doc) else { return false };
+        let Some(tab) = pane.tabs.get_mut(pane.active) else {
+            return false;
+        };
+        let Some(doc) = self.docs.get_mut(&tab.doc) else {
+            return false;
+        };
         let doc_id = doc.id;
         let before = (tab.view.scroll, tab.view.zoom, tab.view.current_page);
         let mut actions = Vec::new();
@@ -1349,7 +1664,12 @@ impl BdfApp {
             self.active_pane = index;
         }
         if self.panes.len() > 1 && active {
-            ui.painter().rect_stroke(body.shrink(1.0), CornerRadius::ZERO, egui::Stroke::new(1.5, pal.accent.gamma_multiply(0.6)), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                body.shrink(1.0),
+                CornerRadius::ZERO,
+                egui::Stroke::new(1.5, pal.accent.gamma_multiply(0.6)),
+                egui::StrokeKind::Inside,
+            );
         }
         if active && self.find.open {
             self.find_bar(ui, ctx, body);
@@ -1381,7 +1701,11 @@ impl BdfApp {
                     .show(ui, |ui| {
                         ui.set_max_width(380.0);
                         ui.horizontal(|ui| {
-                            let (icon, color) = if t.error { (theme::icon::WARNING, pal.danger) } else { (theme::icon::CHECK, pal.success) };
+                            let (icon, color) = if t.error {
+                                (theme::icon::WARNING, pal.danger)
+                            } else {
+                                (theme::icon::CHECK, pal.success)
+                            };
                             ui.label(egui::RichText::new(icon).color(color).size(16.0));
                             ui.label(&t.text);
                         });
@@ -1399,20 +1723,36 @@ impl BdfApp {
     }
 
     fn drop_files(&mut self, ctx: &Context) {
-        let (hovering, dropped) = ctx.input(|i| (!i.raw.hovered_files.is_empty(), i.raw.dropped_files.clone()));
+        let (hovering, dropped) =
+            ctx.input(|i| (!i.raw.hovered_files.is_empty(), i.raw.dropped_files.clone()));
         if hovering {
             let screen = ctx.content_rect();
-            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::unique("drop")));
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                Id::unique("drop"),
+            ));
             let pal = theme::palette(Self::is_dark(ctx));
             painter.rect_filled(screen, CornerRadius::ZERO, Color32::from_black_alpha(120));
-            painter.rect_stroke(screen.shrink(16.0), CornerRadius::same(12), egui::Stroke::new(3.0, pal.accent), egui::StrokeKind::Inside);
-            painter.text(screen.center(), egui::Align2::CENTER_CENTER, format!("{}  Drop to open", theme::icon::PDF), egui::FontId::proportional(28.0), Color32::WHITE);
+            painter.rect_stroke(
+                screen.shrink(16.0),
+                CornerRadius::same(12),
+                egui::Stroke::new(3.0, pal.accent),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                screen.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{}  Drop to open", theme::icon::PDF),
+                egui::FontId::proportional(28.0),
+                Color32::WHITE,
+            );
         }
         if !dropped.is_empty() {
             // Open into the pane under the pointer.
             let pane = self.active_pane;
             for f in dropped {
-                { let p = f.path().to_path_buf();
+                {
+                    let p = f.path().to_path_buf();
                     self.open_path(&p, pane);
                 }
             }
@@ -1434,20 +1774,41 @@ impl BdfApp {
         };
         let mut ft: Vec<f32> = self.perf.frame_ms.iter().copied().collect();
         ft.sort_by(f32::total_cmp);
-        let p = |q: f32| ft.get(((ft.len() as f32 - 1.0) * q) as usize).copied().unwrap_or(0.0);
+        let p = |q: f32| {
+            ft.get(((ft.len() as f32 - 1.0) * q) as usize)
+                .copied()
+                .unwrap_or(0.0)
+        };
         egui::Area::new(Id::unique("perf"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::RIGHT_TOP, vec2(-12.0, 90.0))
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.monospace(format!("frame p50 {:5.1} ms  p95 {:5.1} ms", p(0.5), p(0.95)));
-                    ui.monospace(format!("memory {}  peak {}", crate::sysinfo::mib(sample.rss_bytes), crate::sysinfo::mib(sample.peak_rss_bytes)));
-                    ui.monospace(format!("textures {} ({:.0} MB)  pending {}", self.tiles.len(), self.tiles.used_bytes() as f64 / 1_048_576.0, self.tiles.pending()));
+                    ui.monospace(format!(
+                        "frame p50 {:5.1} ms  p95 {:5.1} ms",
+                        p(0.5),
+                        p(0.95)
+                    ));
+                    ui.monospace(format!(
+                        "memory {}  peak {}",
+                        crate::sysinfo::mib(sample.rss_bytes),
+                        crate::sysinfo::mib(sample.peak_rss_bytes)
+                    ));
+                    ui.monospace(format!(
+                        "textures {} ({:.0} MB)  pending {}",
+                        self.tiles.len(),
+                        self.tiles.used_bytes() as f64 / 1_048_576.0,
+                        self.tiles.pending()
+                    ));
                     if let Some(w) = &self.worker {
                         let s = &w.stats;
                         let n = s.tiles_rendered.load(std::sync::atomic::Ordering::Relaxed);
                         let us = s.render_micros.load(std::sync::atomic::Ordering::Relaxed);
-                        ui.monospace(format!("rendered {n}  avg {:.1} ms  dropped {}", us as f64 / 1000.0 / n.max(1) as f64, s.tiles_dropped.load(std::sync::atomic::Ordering::Relaxed)));
+                        ui.monospace(format!(
+                            "rendered {n}  avg {:.1} ms  dropped {}",
+                            us as f64 / 1000.0 / n.max(1) as f64,
+                            s.tiles_dropped.load(std::sync::atomic::Ordering::Relaxed)
+                        ));
                     }
                     ui.monospace(format!("renderer {}", self.renderer));
                 });
@@ -1500,7 +1861,11 @@ impl eframe::App for BdfApp {
         }
 
         self.shortcuts(&ctx);
-        if self.find.edited.is_some_and(|t| t.elapsed() > Duration::from_millis(300)) {
+        if self
+            .find
+            .edited
+            .is_some_and(|t| t.elapsed() > Duration::from_millis(300))
+        {
             self.find.edited = None;
             self.run_search();
         }
@@ -1560,14 +1925,23 @@ impl BdfApp {
         if self.fullscreen {
             return;
         }
-        let (rect, max) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().maximized.unwrap_or(false)));
+        let (rect, max) = ctx.input(|i| {
+            (
+                i.viewport().outer_rect,
+                i.viewport().maximized.unwrap_or(false),
+            )
+        });
         if max != self.settings.maximized {
             self.settings.maximized = max;
             self.settings_changed = true;
         }
         if let Some(r) = rect.filter(|_| !max) {
             let w = [r.min.x, r.min.y, r.width(), r.height()];
-            if self.settings.window.is_none_or(|o| o.iter().zip(w).any(|(a, b)| (a - b).abs() > 1.0)) {
+            if self
+                .settings
+                .window
+                .is_none_or(|o| o.iter().zip(w).any(|(a, b)| (a - b).abs() > 1.0))
+            {
                 self.settings.window = Some(w);
                 self.settings_changed = true;
             }

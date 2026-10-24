@@ -29,23 +29,74 @@ use std::time::{Duration, Instant};
 
 pub enum Request {
     /// `doc` comes from [`WorkerHandle::alloc_doc_id`].
-    Open { doc: DocId, path: PathBuf, password: Option<String> },
-    Close { doc: DocId },
-    Render { key: TileKey, priority: u32 },
+    Open {
+        doc: DocId,
+        path: PathBuf,
+        password: Option<String>,
+    },
+    Close {
+        doc: DocId,
+    },
+    Render {
+        key: TileKey,
+        priority: u32,
+    },
     /// Keep only these queued renders, with updated priorities.
-    Retain { keys: Vec<(TileKey, u32)> },
-    Region { req: RegionReq },
-    PageData { doc: DocId, page: u32 },
-    Search { doc: DocId, ticket: u64, query: String, opts: SearchOptions, start_page: u32 },
-    CancelSearch { doc: DocId },
+    Retain {
+        keys: Vec<(TileKey, u32)>,
+    },
+    Region {
+        req: RegionReq,
+    },
+    PageData {
+        doc: DocId,
+        page: u32,
+    },
+    Search {
+        doc: DocId,
+        ticket: u64,
+        query: String,
+        opts: SearchOptions,
+        start_page: u32,
+    },
+    CancelSearch {
+        doc: DocId,
+    },
     /// List every annotation in the document, page by page.
-    ScanAnnots { doc: DocId, ticket: u64 },
-    AddAnnot { doc: DocId, page: u32, annot: NewAnnot, ticket: u64 },
-    RemoveAnnot { doc: DocId, page: u32, index: usize, name: Option<String>, ticket: u64 },
-    SetAnnotText { doc: DocId, page: u32, index: usize, name: Option<String>, text: String, ticket: u64 },
-    Save { doc: DocId, target: PathBuf, ticket: u64 },
+    ScanAnnots {
+        doc: DocId,
+        ticket: u64,
+    },
+    AddAnnot {
+        doc: DocId,
+        page: u32,
+        annot: NewAnnot,
+        ticket: u64,
+    },
+    RemoveAnnot {
+        doc: DocId,
+        page: u32,
+        index: usize,
+        name: Option<String>,
+        ticket: u64,
+    },
+    SetAnnotText {
+        doc: DocId,
+        page: u32,
+        index: usize,
+        name: Option<String>,
+        text: String,
+        ticket: u64,
+    },
+    Save {
+        doc: DocId,
+        target: PathBuf,
+        ticket: u64,
+    },
     /// Run a closure on the engine thread (printing, export).
-    Job { job: EngineJob },
+    Job {
+        job: EngineJob,
+    },
     Shutdown,
 }
 
@@ -60,16 +111,55 @@ pub struct SearchHit {
 
 #[derive(Debug)]
 pub enum Response {
-    Opened { doc: DocId, result: Result<Box<DocInfo>, OpenError> },
-    Tile { key: TileKey, result: Result<Image, String> },
-    Region { req: RegionReq, image: Result<Image, String> },
-    PageData { doc: DocId, page: u32, data: Result<Box<PageData>, String> },
-    SearchHits { doc: DocId, ticket: u64, hits: Vec<SearchHit> },
-    SearchProgress { doc: DocId, ticket: u64, searched: u32, total: u32, done: bool },
-    Annots { doc: DocId, ticket: u64, page: u32, annots: Vec<AnnotInfo>, done: bool },
+    Opened {
+        doc: DocId,
+        result: Result<Box<DocInfo>, OpenError>,
+    },
+    Tile {
+        key: TileKey,
+        result: Result<Image, String>,
+    },
+    Region {
+        req: RegionReq,
+        image: Result<Image, String>,
+    },
+    PageData {
+        doc: DocId,
+        page: u32,
+        data: Result<Box<PageData>, String>,
+    },
+    SearchHits {
+        doc: DocId,
+        ticket: u64,
+        hits: Vec<SearchHit>,
+    },
+    SearchProgress {
+        doc: DocId,
+        ticket: u64,
+        searched: u32,
+        total: u32,
+        done: bool,
+    },
+    Annots {
+        doc: DocId,
+        ticket: u64,
+        page: u32,
+        annots: Vec<AnnotInfo>,
+        done: bool,
+    },
     /// An annotation edit finished; `page` must be re-rendered.
-    AnnotEdited { doc: DocId, page: u32, ticket: u64, result: Result<String, String> },
-    Saved { doc: DocId, ticket: u64, target: PathBuf, result: Result<(), String> },
+    AnnotEdited {
+        doc: DocId,
+        page: u32,
+        ticket: u64,
+        result: Result<String, String>,
+    },
+    Saved {
+        doc: DocId,
+        ticket: u64,
+        target: PathBuf,
+        result: Result<(), String>,
+    },
     /// The engine thread hit an unexpected panic in a job and recovered.
     Fault(String),
 }
@@ -198,13 +288,43 @@ struct SearchJob {
 }
 
 enum Control {
-    Open { doc: DocId, path: PathBuf, password: Option<String> },
-    Close { doc: DocId },
-    AddAnnot { doc: DocId, page: u32, annot: NewAnnot, ticket: u64 },
-    RemoveAnnot { doc: DocId, page: u32, index: usize, name: Option<String>, ticket: u64 },
-    SetAnnotText { doc: DocId, page: u32, index: usize, name: Option<String>, text: String, ticket: u64 },
-    Save { doc: DocId, target: PathBuf, ticket: u64 },
-    Job { job: EngineJob },
+    Open {
+        doc: DocId,
+        path: PathBuf,
+        password: Option<String>,
+    },
+    Close {
+        doc: DocId,
+    },
+    AddAnnot {
+        doc: DocId,
+        page: u32,
+        annot: NewAnnot,
+        ticket: u64,
+    },
+    RemoveAnnot {
+        doc: DocId,
+        page: u32,
+        index: usize,
+        name: Option<String>,
+        ticket: u64,
+    },
+    SetAnnotText {
+        doc: DocId,
+        page: u32,
+        index: usize,
+        name: Option<String>,
+        text: String,
+        ticket: u64,
+    },
+    Save {
+        doc: DocId,
+        target: PathBuf,
+        ticket: u64,
+    },
+    Job {
+        job: EngineJob,
+    },
 }
 
 struct Worker {
@@ -307,8 +427,16 @@ impl Worker {
 
     fn accept(&mut self, r: Request) {
         match r {
-            Request::Open { doc, path, password } => {
-                self.control.push_back(Control::Open { doc, path, password });
+            Request::Open {
+                doc,
+                path,
+                password,
+            } => {
+                self.control.push_back(Control::Open {
+                    doc,
+                    path,
+                    password,
+                });
             }
             Request::Close { doc } => {
                 self.drop_doc_work(doc);
@@ -351,9 +479,19 @@ impl Worker {
                     self.page_data.push_back((doc, page));
                 }
             }
-            Request::Search { doc, ticket, query, opts, start_page } => {
+            Request::Search {
+                doc,
+                ticket,
+                query,
+                opts,
+                start_page,
+            } => {
                 let total = self.open_docs.get(&doc).copied().unwrap_or(0);
-                let start = if total == 0 { 0 } else { start_page.min(total - 1) };
+                let start = if total == 0 {
+                    0
+                } else {
+                    start_page.min(total - 1)
+                };
                 let queue: VecDeque<u32> = (start..total).chain(0..start).collect();
                 self.searches.insert(
                     doc,
@@ -375,30 +513,66 @@ impl Worker {
                 let total = self.open_docs.get(&doc).copied().unwrap_or(0);
                 self.scans.insert(doc, (ticket, 0, total));
             }
-            Request::AddAnnot { doc, page, annot, ticket } => {
-                self.control.push_back(Control::AddAnnot { doc, page, annot, ticket })
-            }
-            Request::RemoveAnnot { doc, page, index, name, ticket } => self
-                .control
-                .push_back(Control::RemoveAnnot { doc, page, index, name, ticket }),
-            Request::SetAnnotText { doc, page, index, name, text, ticket } => self
-                .control
-                .push_back(Control::SetAnnotText { doc, page, index, name, text, ticket }),
-            Request::Save { doc, target, ticket } => {
-                self.control.push_back(Control::Save { doc, target, ticket })
-            }
+            Request::AddAnnot {
+                doc,
+                page,
+                annot,
+                ticket,
+            } => self.control.push_back(Control::AddAnnot {
+                doc,
+                page,
+                annot,
+                ticket,
+            }),
+            Request::RemoveAnnot {
+                doc,
+                page,
+                index,
+                name,
+                ticket,
+            } => self.control.push_back(Control::RemoveAnnot {
+                doc,
+                page,
+                index,
+                name,
+                ticket,
+            }),
+            Request::SetAnnotText {
+                doc,
+                page,
+                index,
+                name,
+                text,
+                ticket,
+            } => self.control.push_back(Control::SetAnnotText {
+                doc,
+                page,
+                index,
+                name,
+                text,
+                ticket,
+            }),
+            Request::Save {
+                doc,
+                target,
+                ticket,
+            } => self.control.push_back(Control::Save {
+                doc,
+                target,
+                ticket,
+            }),
             Request::Job { job } => self.control.push_back(Control::Job { job }),
             Request::Shutdown => self.shutdown = true,
         }
     }
 
     fn reprioritise(&mut self, key: TileKey, priority: u32) {
-        if let Some(&(p, s)) = self.queued.get(&key) {
-            if p != priority {
-                self.queue.remove(&(p, s));
-                self.queue.insert((priority, s), key);
-                self.queued.insert(key, (priority, s));
-            }
+        if let Some(&(p, s)) = self.queued.get(&key)
+            && p != priority
+        {
+            self.queue.remove(&(p, s));
+            self.queue.insert((priority, s), key);
+            self.queued.insert(key, (priority, s));
         }
     }
 
@@ -409,7 +583,12 @@ impl Worker {
         if self.region.is_some_and(|r| r.doc == doc) {
             self.region = None;
         }
-        let drop: Vec<TileKey> = self.queued.keys().filter(|k| k.doc == doc).copied().collect();
+        let drop: Vec<TileKey> = self
+            .queued
+            .keys()
+            .filter(|k| k.doc == doc)
+            .copied()
+            .collect();
         for k in drop {
             if let Some(slot) = self.queued.remove(&k) {
                 self.queue.remove(&slot);
@@ -482,10 +661,19 @@ impl Worker {
         };
         if page >= total {
             self.scans.remove(&doc);
-            self.send(Response::Annots { doc, ticket, page, annots: Vec::new(), done: true });
+            self.send(Response::Annots {
+                doc,
+                ticket,
+                page,
+                annots: Vec::new(),
+                done: true,
+            });
             return;
         }
-        let annots = self.guarded(|e| e.annotations(doc, page)).and_then(|r| r).unwrap_or_default();
+        let annots = self
+            .guarded(|e| e.annotations(doc, page))
+            .and_then(|r| r)
+            .unwrap_or_default();
         let done = page + 1 >= total;
         if done {
             self.scans.remove(&doc);
@@ -493,49 +681,104 @@ impl Worker {
             self.scans.insert(doc, (ticket, page + 1, total));
         }
         if !annots.is_empty() || done {
-            self.send(Response::Annots { doc, ticket, page, annots, done });
+            self.send(Response::Annots {
+                doc,
+                ticket,
+                page,
+                annots,
+                done,
+            });
         }
     }
 
     fn run_control(&mut self, c: Control) {
         match c {
-            Control::Open { doc, path, password } => {
+            Control::Open {
+                doc,
+                path,
+                password,
+            } => {
                 let result = self
                     .guarded(|e| e.open(doc, &path, password.as_deref()))
                     .unwrap_or_else(|e| Err(OpenError::Engine(e)));
                 if let Ok(info) = &result {
                     self.open_docs.insert(doc, info.page_sizes.len() as u32);
                 }
-                self.send(Response::Opened { doc, result: result.map(Box::new) });
+                self.send(Response::Opened {
+                    doc,
+                    result: result.map(Box::new),
+                });
             }
             Control::Close { doc } => {
                 if self.open_docs.remove(&doc).is_some() {
                     let _ = self.guarded(|e| e.close(doc));
                 }
             }
-            Control::AddAnnot { doc, page, annot, ticket } => {
+            Control::AddAnnot {
+                doc,
+                page,
+                annot,
+                ticket,
+            } => {
                 let result = self
                     .guarded(|e| e.add_annot(doc, page, &annot))
                     .and_then(|r| r);
-                self.send(Response::AnnotEdited { doc, page, ticket, result });
+                self.send(Response::AnnotEdited {
+                    doc,
+                    page,
+                    ticket,
+                    result,
+                });
             }
-            Control::RemoveAnnot { doc, page, index, name, ticket } => {
+            Control::RemoveAnnot {
+                doc,
+                page,
+                index,
+                name,
+                ticket,
+            } => {
                 let result = self
                     .guarded(|e| e.remove_annot(doc, page, index, name.as_deref()))
                     .and_then(|r| r)
                     .map(|_| name.unwrap_or_default());
-                self.send(Response::AnnotEdited { doc, page, ticket, result });
+                self.send(Response::AnnotEdited {
+                    doc,
+                    page,
+                    ticket,
+                    result,
+                });
             }
-            Control::SetAnnotText { doc, page, index, name, text, ticket } => {
+            Control::SetAnnotText {
+                doc,
+                page,
+                index,
+                name,
+                text,
+                ticket,
+            } => {
                 let result = self
                     .guarded(|e| e.set_annot_contents(doc, page, index, name.as_deref(), &text))
                     .and_then(|r| r)
                     .map(|_| name.unwrap_or_default());
-                self.send(Response::AnnotEdited { doc, page, ticket, result });
+                self.send(Response::AnnotEdited {
+                    doc,
+                    page,
+                    ticket,
+                    result,
+                });
             }
-            Control::Save { doc, target, ticket } => {
+            Control::Save {
+                doc,
+                target,
+                ticket,
+            } => {
                 let result = self.guarded(|e| e.save(doc, &target)).and_then(|r| r);
-                self.send(Response::Saved { doc, ticket, target, result });
+                self.send(Response::Saved {
+                    doc,
+                    ticket,
+                    target,
+                    result,
+                });
             }
             Control::Job { job } => {
                 let _ = self.guarded(|e| job(e));
@@ -571,7 +814,11 @@ impl Worker {
                         snippet: text.snippet(*m, 40),
                     })
                     .collect();
-                self.send(Response::SearchHits { doc, ticket: job.ticket, hits });
+                self.send(Response::SearchHits {
+                    doc,
+                    ticket: job.ticket,
+                    hits,
+                });
             }
         }
         let done = job.queue.is_empty();
@@ -607,7 +854,12 @@ mod tests {
     }
 
     impl Engine for Fake {
-        fn open(&mut self, _id: DocId, path: &Path, _pw: Option<&str>) -> Result<DocInfo, OpenError> {
+        fn open(
+            &mut self,
+            _id: DocId,
+            path: &Path,
+            _pw: Option<&str>,
+        ) -> Result<DocInfo, OpenError> {
             if path.to_string_lossy().contains("missing") {
                 return Err(OpenError::NotFound);
             }
@@ -631,15 +883,30 @@ mod tests {
             if key.page == 666 {
                 panic!("boom");
             }
-            self.log.lock().unwrap().push(format!("render {}", key.page));
-            Ok(Image { width: 1, height: 1, rgba: vec![0; 4] })
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("render {}", key.page));
+            Ok(Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0; 4],
+            })
         }
         fn render_region(&mut self, _r: &RegionReq) -> EResult<Image> {
             self.log.lock().unwrap().push("region".into());
-            Ok(Image { width: 1, height: 1, rgba: vec![0; 4] })
+            Ok(Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0; 4],
+            })
         }
         fn render_page(&mut self, _: DocId, _: u32, w: u32, h: u32, _: bool) -> EResult<Image> {
-            Ok(Image { width: w, height: h, rgba: vec![0; (w * h * 4) as usize] })
+            Ok(Image {
+                width: w,
+                height: h,
+                rgba: vec![0; (w * h * 4) as usize],
+            })
         }
         fn page_size(&self, _: DocId, _: u32) -> Option<(f32, f32)> {
             Some((612.0, 792.0))
@@ -664,12 +931,19 @@ mod tests {
             })
         }
         fn page_text(&mut self, _: DocId, page: u32) -> EResult<PageText> {
-            let s = if page % 3 == 0 { "a needle here" } else { "hay" };
+            let s = if page.is_multiple_of(3) {
+                "a needle here"
+            } else {
+                "hay"
+            };
             Ok(PageText {
                 chars: s
                     .chars()
                     .enumerate()
-                    .map(|(i, ch)| TextChar { ch, rect: Some([i as f32, 0.0, i as f32 + 1.0, 1.0]) })
+                    .map(|(i, ch)| TextChar {
+                        ch,
+                        rect: Some([i as f32, 0.0, i as f32 + 1.0, 1.0]),
+                    })
                     .collect(),
             })
         }
@@ -679,7 +953,14 @@ mod tests {
         fn remove_annot(&mut self, _: DocId, _: u32, _: usize, _: Option<&str>) -> EResult<()> {
             Err("nope".into())
         }
-        fn set_annot_contents(&mut self, _: DocId, _: u32, _: usize, _: Option<&str>, _: &str) -> EResult<()> {
+        fn set_annot_contents(
+            &mut self,
+            _: DocId,
+            _: u32,
+            _: usize,
+            _: Option<&str>,
+            _: &str,
+        ) -> EResult<()> {
             Ok(())
         }
         fn save(&mut self, _: DocId, _: &Path) -> EResult<()> {
@@ -690,8 +971,11 @@ mod tests {
     fn start(pages: u32) -> (WorkerHandle, Arc<Mutex<Vec<String>>>) {
         let log = Arc::new(Mutex::new(Vec::new()));
         let l2 = log.clone();
-        let w = WorkerHandle::spawn(move || Ok(Box::new(Fake { log: l2, pages }) as Box<dyn Engine>), Box::new(|| {}))
-            .unwrap();
+        let w = WorkerHandle::spawn(
+            move || Ok(Box::new(Fake { log: l2, pages }) as Box<dyn Engine>),
+            Box::new(|| {}),
+        )
+        .unwrap();
         (w, log)
     }
 
@@ -707,14 +991,22 @@ mod tests {
     }
 
     fn recv(w: &WorkerHandle) -> Response {
-        w.rx.recv_timeout(Duration::from_secs(5)).expect("worker response")
+        w.rx.recv_timeout(Duration::from_secs(5))
+            .expect("worker response")
     }
 
     fn open(w: &WorkerHandle) -> DocId {
         let doc = w.alloc_doc_id();
-        w.send(Request::Open { doc, path: "x.pdf".into(), password: None });
+        w.send(Request::Open {
+            doc,
+            path: "x.pdf".into(),
+            password: None,
+        });
         match recv(w) {
-            Response::Opened { doc: d, result: Ok(_) } => assert_eq!(d, doc),
+            Response::Opened {
+                doc: d,
+                result: Ok(_),
+            } => assert_eq!(d, doc),
             other => panic!("unexpected {other:?}"),
         }
         doc
@@ -740,11 +1032,19 @@ mod tests {
         let doc = open(&w);
         let gate = pause(&w);
         for (page, prio) in [(1, 50), (2, 10), (3, 30), (4, 20), (5, 40)] {
-            w.send(Request::Render { key: key(doc, page), priority: prio });
+            w.send(Request::Render {
+                key: key(doc, page),
+                priority: prio,
+            });
         }
         // Page 5 no longer wanted; page 1 becomes urgent.
         w.send(Request::Retain {
-            keys: vec![(key(doc, 1), 0), (key(doc, 2), 10), (key(doc, 3), 30), (key(doc, 4), 20)],
+            keys: vec![
+                (key(doc, 1), 0),
+                (key(doc, 2), 10),
+                (key(doc, 3), 30),
+                (key(doc, 4), 20),
+            ],
         });
         gate.send(()).unwrap();
         let mut order = Vec::new();
@@ -755,7 +1055,10 @@ mod tests {
             }
         }
         assert_eq!(order, vec![1, 2, 4, 3]);
-        assert!(w.rx.recv_timeout(Duration::from_millis(100)).is_err(), "page 5 must be dropped");
+        assert!(
+            w.rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "page 5 must be dropped"
+        );
         assert_eq!(w.stats.tiles_dropped.load(Ordering::Relaxed), 1);
         assert!(!log.lock().unwrap().contains(&"render 5".to_string()));
     }
@@ -766,7 +1069,10 @@ mod tests {
         let doc = open(&w);
         let gate = pause(&w);
         for _ in 0..5 {
-            w.send(Request::Render { key: key(doc, 2), priority: 1 });
+            w.send(Request::Render {
+                key: key(doc, 2),
+                priority: 1,
+            });
         }
         gate.send(()).unwrap();
         assert!(matches!(recv(&w), Response::Tile { .. }));
@@ -777,7 +1083,10 @@ mod tests {
     fn panics_are_contained() {
         let (w, _log) = start(1000);
         let doc = open(&w);
-        w.send(Request::Render { key: key(doc, 666), priority: 0 });
+        w.send(Request::Render {
+            key: key(doc, 666),
+            priority: 0,
+        });
         let mut saw_fault = false;
         let mut saw_err = false;
         for _ in 0..2 {
@@ -789,7 +1098,10 @@ mod tests {
         }
         assert!(saw_fault && saw_err);
         // Still alive and serving.
-        w.send(Request::Render { key: key(doc, 1), priority: 0 });
+        w.send(Request::Render {
+            key: key(doc, 1),
+            priority: 0,
+        });
         assert!(matches!(recv(&w), Response::Tile { result: Ok(_), .. }));
         assert_eq!(w.stats.jobs_panicked.load(Ordering::Relaxed), 1);
     }
@@ -814,7 +1126,12 @@ mod tests {
                     assert!(hits[0].snippet.contains("needle"));
                     assert_eq!(hits[0].rects.len(), 1);
                 }
-                Response::SearchProgress { done: true, searched, total, .. } => {
+                Response::SearchProgress {
+                    done: true,
+                    searched,
+                    total,
+                    ..
+                } => {
                     assert_eq!((searched, total), (10, 10));
                     break;
                 }
@@ -830,8 +1147,17 @@ mod tests {
         let (w, log) = start(5000);
         let doc = open(&w);
         let gate = pause(&w);
-        w.send(Request::Search { doc, ticket: 1, query: "zzz".into(), opts: SearchOptions::default(), start_page: 0 });
-        w.send(Request::Render { key: key(doc, 3), priority: 0 });
+        w.send(Request::Search {
+            doc,
+            ticket: 1,
+            query: "zzz".into(),
+            opts: SearchOptions::default(),
+            start_page: 0,
+        });
+        w.send(Request::Render {
+            key: key(doc, 3),
+            priority: 0,
+        });
         w.send(Request::PageData { doc, page: 3 });
         gate.send(()).unwrap();
         loop {
@@ -851,21 +1177,40 @@ mod tests {
         let (w, log) = start(10);
         let doc = open(&w);
         let gate = pause(&w);
-        w.send(Request::Render { key: key(doc, 1), priority: 0 });
+        w.send(Request::Render {
+            key: key(doc, 1),
+            priority: 0,
+        });
         w.send(Request::Close { doc });
         gate.send(()).unwrap();
         // A missing file reports NotFound.
         let d2 = w.alloc_doc_id();
-        w.send(Request::Open { doc: d2, path: "missing.pdf".into(), password: None });
+        w.send(Request::Open {
+            doc: d2,
+            path: "missing.pdf".into(),
+            password: None,
+        });
         match recv(&w) {
-            Response::Opened { result: Err(OpenError::NotFound), .. } => {}
+            Response::Opened {
+                result: Err(OpenError::NotFound),
+                ..
+            } => {}
             other => panic!("unexpected {other:?}"),
         }
         assert!(log.lock().unwrap().iter().all(|l| l != "render 1"));
         assert!(log.lock().unwrap().contains(&format!("close {}", doc.0)));
         // Requests for a closed document are ignored, not crashes.
-        w.send(Request::Render { key: key(doc, 2), priority: 0 });
-        w.send(Request::RemoveAnnot { doc: d2, page: 0, index: 0, name: None, ticket: 1 });
+        w.send(Request::Render {
+            key: key(doc, 2),
+            priority: 0,
+        });
+        w.send(Request::RemoveAnnot {
+            doc: d2,
+            page: 0,
+            index: 0,
+            name: None,
+            ticket: 1,
+        });
         match recv(&w) {
             Response::AnnotEdited { result: Err(e), .. } => assert_eq!(e, "nope"),
             other => panic!("unexpected {other:?}"),
@@ -879,7 +1224,17 @@ mod tests {
         let gate = pause(&w);
         for x in 0..5 {
             w.send(Request::Region {
-                req: RegionReq { doc, page: 0, rotation: Rotation::R0, invert: false, scale: 4096, x, y: 0, w: 10, h: 10 },
+                req: RegionReq {
+                    doc,
+                    page: 0,
+                    rotation: Rotation::R0,
+                    invert: false,
+                    scale: 4096,
+                    x,
+                    y: 0,
+                    w: 10,
+                    h: 10,
+                },
             });
         }
         gate.send(()).unwrap();
@@ -887,7 +1242,14 @@ mod tests {
             Response::Region { req, .. } => assert_eq!(req.x, 4),
             other => panic!("unexpected {other:?}"),
         }
-        assert_eq!(log.lock().unwrap().iter().filter(|l| *l == "region").count(), 1);
+        assert_eq!(
+            log.lock()
+                .unwrap()
+                .iter()
+                .filter(|l| *l == "region")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -898,7 +1260,13 @@ mod tests {
         let mut pages = Vec::new();
         loop {
             match recv(&w) {
-                Response::Annots { ticket, page, annots, done, .. } => {
+                Response::Annots {
+                    ticket,
+                    page,
+                    annots,
+                    done,
+                    ..
+                } => {
                     assert_eq!(ticket, 3);
                     if !annots.is_empty() {
                         pages.push(page);

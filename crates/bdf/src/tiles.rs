@@ -86,7 +86,9 @@ impl TileCache {
         if hash != self.last_hash {
             self.last_hash = hash;
             // Keep queued work we still want, drop the rest.
-            worker.send(Request::Retain { keys: self.wanted.clone() });
+            worker.send(Request::Retain {
+                keys: self.wanted.clone(),
+            });
             let wanted = &self.wanted_set;
             self.in_flight.retain(|k, _| wanted.contains(k));
         }
@@ -109,7 +111,10 @@ impl TileCache {
             return;
         }
         let bytes = img.rgba.len();
-        let color = ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba);
+        let color = ColorImage::from_rgba_unmultiplied(
+            [img.width as usize, img.height as usize],
+            &img.rgba,
+        );
         let tex = ctx.load_texture(format!("tile-{key:?}"), color, TextureOptions::LINEAR);
         self.uploads += 1;
         self.lru.insert(key, tex, bytes);

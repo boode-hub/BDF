@@ -113,7 +113,11 @@ impl PageText {
         for c in query.trim().chars() {
             let c = normalize_char(c);
             let e = expand(c);
-            let seq: Vec<char> = if e.is_empty() { vec![c] } else { e.chars().collect() };
+            let seq: Vec<char> = if e.is_empty() {
+                vec![c]
+            } else {
+                e.chars().collect()
+            };
             for c in seq {
                 let c = fold(c, opts.match_case);
                 if c.is_whitespace() {
@@ -202,14 +206,14 @@ impl PageText {
             if !(r[2] > r[0] || r[3] > r[1]) {
                 continue;
             }
-            if let Some(last) = out.last_mut() {
-                if same_line(last, &r) {
-                    last[0] = last[0].min(r[0]);
-                    last[1] = last[1].min(r[1]);
-                    last[2] = last[2].max(r[2]);
-                    last[3] = last[3].max(r[3]);
-                    continue;
-                }
+            if let Some(last) = out.last_mut()
+                && same_line(last, &r)
+            {
+                last[0] = last[0].min(r[0]);
+                last[1] = last[1].min(r[1]);
+                last[2] = last[2].max(r[2]);
+                last[3] = last[3].max(r[3]);
+                continue;
             }
             out.push(r);
         }
@@ -244,10 +248,22 @@ impl PageText {
     pub fn select(&self, a: (f32, f32), b: (f32, f32)) -> Option<(usize, usize)> {
         let i = self.char_near(a.0, a.1)?;
         let j = self.char_near(b.0, b.1)?;
-        let ((s, sp), (e, ep)) = if (i, a.0) <= (j, b.0) { ((i, a), (j, b)) } else { ((j, b), (i, a)) };
+        let ((s, sp), (e, ep)) = if (i, a.0) <= (j, b.0) {
+            ((i, a), (j, b))
+        } else {
+            ((j, b), (i, a))
+        };
         let mid = |k: usize| self.chars[k].rect.map(|r| (r[0] + r[2]) * 0.5);
-        let start = if mid(s).is_some_and(|m| sp.0 > m) { s + 1 } else { s };
-        let end = if mid(e).is_some_and(|m| ep.0 < m) { e } else { e + 1 };
+        let start = if mid(s).is_some_and(|m| sp.0 > m) {
+            s + 1
+        } else {
+            s
+        };
+        let end = if mid(e).is_some_and(|m| ep.0 < m) {
+            e
+        } else {
+            e + 1
+        };
         (end > start).then_some((start, end))
     }
 
@@ -335,29 +351,47 @@ mod tests {
                 chars.push(TextChar { ch, rect });
             }
             if li + 1 < lines.len() {
-                chars.push(TextChar { ch: '\r', rect: None });
-                chars.push(TextChar { ch: '\n', rect: None });
+                chars.push(TextChar {
+                    ch: '\r',
+                    rect: None,
+                });
+                chars.push(TextChar {
+                    ch: '\n',
+                    rect: None,
+                });
             }
         }
         PageText { chars }
     }
 
     fn found(p: &PageText, q: &str, o: SearchOptions) -> Vec<String> {
-        p.search(q, o).iter().map(|m| p.slice(m.start, m.end)).collect()
+        p.search(q, o)
+            .iter()
+            .map(|m| p.slice(m.start, m.end))
+            .collect()
     }
 
     #[test]
     fn case_insensitive_by_default() {
         let p = page(&["The cat and the CAT", "concatenate"]);
-        assert_eq!(found(&p, "cat", Default::default()), vec!["cat", "CAT", "cat"]);
-        let o = SearchOptions { match_case: true, ..Default::default() };
+        assert_eq!(
+            found(&p, "cat", Default::default()),
+            vec!["cat", "CAT", "cat"]
+        );
+        let o = SearchOptions {
+            match_case: true,
+            ..Default::default()
+        };
         assert_eq!(found(&p, "CAT", o), vec!["CAT"]);
     }
 
     #[test]
     fn whole_word() {
         let p = page(&["cat concatenate cat_s cat."]);
-        let o = SearchOptions { whole_word: true, ..Default::default() };
+        let o = SearchOptions {
+            whole_word: true,
+            ..Default::default()
+        };
         let m = p.search("cat", o);
         assert_eq!(m.len(), 2);
         assert_eq!(m[0].start, 0);
@@ -385,12 +419,24 @@ mod tests {
     #[test]
     fn hyphenation_break_is_ignored() {
         let mut p = page(&["hyphen"]);
-        p.chars.push(TextChar { ch: '\u{2}', rect: Some([110.0, 788.0, 115.0, 800.0]) });
-        p.chars.push(TextChar { ch: '\r', rect: None });
-        p.chars.push(TextChar { ch: '\n', rect: None });
+        p.chars.push(TextChar {
+            ch: '\u{2}',
+            rect: Some([110.0, 788.0, 115.0, 800.0]),
+        });
+        p.chars.push(TextChar {
+            ch: '\r',
+            rect: None,
+        });
+        p.chars.push(TextChar {
+            ch: '\n',
+            rect: None,
+        });
         for (i, ch) in "ated".chars().enumerate() {
             let x = 50.0 + i as f32 * 10.0;
-            p.chars.push(TextChar { ch, rect: Some([x, 768.0, x + 10.0, 780.0]) });
+            p.chars.push(TextChar {
+                ch,
+                rect: Some([x, 768.0, x + 10.0, 780.0]),
+            });
         }
         assert_eq!(found(&p, "hyphenated", Default::default()).len(), 1);
         assert!(found(&p, "hyphen ated", Default::default()).is_empty());

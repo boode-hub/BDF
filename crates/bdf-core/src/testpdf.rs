@@ -42,7 +42,10 @@ pub struct PdfSpec {
 
 impl PageSpec {
     pub fn letter() -> Self {
-        Self { size: (612.0, 792.0), ..Default::default() }
+        Self {
+            size: (612.0, 792.0),
+            ..Default::default()
+        }
     }
 
     pub fn with_text(mut self, x: f32, y: f32, size: f32, s: &str) -> Self {
@@ -90,7 +93,11 @@ impl PdfSpec {
         let mut objects: Vec<(usize, String)> = Vec::new();
 
         let mut flat: Vec<(usize, &OutlineSpec, Option<usize>)> = Vec::new();
-        fn walk<'a>(items: &'a [OutlineSpec], parent: Option<usize>, out: &mut Vec<(usize, &'a OutlineSpec, Option<usize>)>) {
+        fn walk<'a>(
+            items: &'a [OutlineSpec],
+            parent: Option<usize>,
+            out: &mut Vec<(usize, &'a OutlineSpec, Option<usize>)>,
+        ) {
             for it in items {
                 let idx = out.len();
                 out.push((idx, it, parent));
@@ -103,16 +110,23 @@ impl PdfSpec {
 
         let mut catalog = String::from("<< /Type /Catalog /Pages 2 0 R");
         if !flat.is_empty() {
-            let _ = write!(catalog, " /Outlines {outlines_root} 0 R /PageMode /UseOutlines");
+            let _ = write!(
+                catalog,
+                " /Outlines {outlines_root} 0 R /PageMode /UseOutlines"
+            );
         }
         catalog.push_str(" >>");
         objects.push((1, catalog));
 
         let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", page_obj(i))).collect();
-        objects.push((2, format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" "))));
+        objects.push((
+            2,
+            format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")),
+        ));
         objects.push((
             3,
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+                .into(),
         ));
         let mut info = String::from("<< /Producer (BDF test writer)");
         if let Some(t) = &self.title {
@@ -130,7 +144,13 @@ impl PdfSpec {
                 let _ = writeln!(
                     content,
                     "{} {} {} rg {} {} {} {} re f",
-                    c[0], c[1], c[2], r[0], r[1], r[2] - r[0], r[3] - r[1]
+                    c[0],
+                    c[1],
+                    c[2],
+                    r[0],
+                    r[1],
+                    r[2] - r[0],
+                    r[3] - r[1]
                 );
             }
             if !p.text.is_empty() {
@@ -142,7 +162,11 @@ impl PdfSpec {
             let mut annots = Vec::new();
             for (r, l) in &p.links {
                 let target = match l {
-                    LinkSpec::Page(t) => format!("/Dest [{} 0 R /XYZ 0 {} 0]", page_obj(*t), self.pages.get(*t).map(|p| p.size.1).unwrap_or(792.0)),
+                    LinkSpec::Page(t) => format!(
+                        "/Dest [{} 0 R /XYZ 0 {} 0]",
+                        page_obj(*t),
+                        self.pages.get(*t).map(|p| p.size.1).unwrap_or(792.0)
+                    ),
                     LinkSpec::Uri(u) => format!("/A << /S /URI /URI ({}) >>", escape(u)),
                 };
                 annots.push(format!(
@@ -152,7 +176,9 @@ impl PdfSpec {
             }
             let mut page = format!(
                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << /Font << /F1 3 0 R >> >> /Contents {} 0 R",
-                p.size.0, p.size.1, content_obj(i)
+                p.size.0,
+                p.size.1,
+                content_obj(i)
             );
             if p.rotate != 0 {
                 let _ = write!(page, " /Rotate {}", p.rotate);
@@ -164,7 +190,10 @@ impl PdfSpec {
             objects.push((page_obj(i), page));
             objects.push((
                 content_obj(i),
-                format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
+                format!(
+                    "<< /Length {} >>\nstream\n{content}endstream",
+                    content.len()
+                ),
             ));
         }
 
@@ -180,9 +209,14 @@ impl PdfSpec {
                 ),
             ));
             for &(idx, item, parent) in &flat {
-                let siblings: Vec<usize> = flat.iter().filter(|f| f.2 == parent).map(|f| f.0).collect();
+                let siblings: Vec<usize> =
+                    flat.iter().filter(|f| f.2 == parent).map(|f| f.0).collect();
                 let pos = siblings.iter().position(|&s| s == idx).expect("self");
-                let children: Vec<usize> = flat.iter().filter(|f| f.2 == Some(idx)).map(|f| f.0).collect();
+                let children: Vec<usize> = flat
+                    .iter()
+                    .filter(|f| f.2 == Some(idx))
+                    .map(|f| f.0)
+                    .collect();
                 let mut o = format!(
                     "<< /Title {} /Parent {} 0 R /Dest [{} 0 R /Fit]",
                     text_string(&item.title),
@@ -220,7 +254,7 @@ impl PdfSpec {
         let xref = out.len();
         let mut x = format!("xref\n0 {count}\n0000000000 65535 f \n");
         for off in offsets.iter().skip(1) {
-            let _ = write!(x, "{off:010} 00000 n \n");
+            let _ = writeln!(x, "{off:010} 00000 n ");
         }
         let _ = write!(
             x,
@@ -232,9 +266,30 @@ impl PdfSpec {
 }
 
 const WORDS: &[&str] = &[
-    "forensic", "evidence", "timeline", "artifact", "registry", "memory", "network", "packet",
-    "volume", "partition", "signature", "hash", "record", "journal", "process", "thread",
-    "kernel", "driver", "service", "account", "session", "browser", "cache", "history",
+    "forensic",
+    "evidence",
+    "timeline",
+    "artifact",
+    "registry",
+    "memory",
+    "network",
+    "packet",
+    "volume",
+    "partition",
+    "signature",
+    "hash",
+    "record",
+    "journal",
+    "process",
+    "thread",
+    "kernel",
+    "driver",
+    "service",
+    "account",
+    "session",
+    "browser",
+    "cache",
+    "history",
 ];
 
 /// A long synthetic document: `pages` letter pages of text, every tenth page
@@ -252,7 +307,12 @@ pub fn long_document(pages: usize) -> Vec<u8> {
         if i % 10 == 9 {
             p.rotate = 90;
         }
-        p.text.push((72.0, 740.0, 18.0, format!("Chapter {} PAGE-{}", i / 10 + 1, i + 1)));
+        p.text.push((
+            72.0,
+            740.0,
+            18.0,
+            format!("Chapter {} PAGE-{}", i / 10 + 1, i + 1),
+        ));
         for line in 0..40 {
             let mut s = String::new();
             for _ in 0..11 {
@@ -264,7 +324,8 @@ pub fn long_document(pages: usize) -> Vec<u8> {
         }
         p.rects.push(([72.0, 40.0, 540.0, 46.0], [0.2, 0.4, 0.9]));
         if i + 1 < pages {
-            p.links.push(([480.0, 20.0, 540.0, 36.0], LinkSpec::Page(i + 1)));
+            p.links
+                .push(([480.0, 20.0, 540.0, 36.0], LinkSpec::Page(i + 1)));
             p.text.push((482.0, 24.0, 10.0, "Next".into()));
         }
         spec.pages.push(p);
@@ -287,18 +348,39 @@ mod tests {
     fn xref_offsets_point_at_objects() {
         let pdf = PdfSpec {
             pages: vec![PageSpec::letter().with_text(72.0, 700.0, 12.0, "Hello (world)")],
-            outline: vec![OutlineSpec { title: "One".into(), page: 0, children: vec![] }],
+            outline: vec![OutlineSpec {
+                title: "One".into(),
+                page: 0,
+                children: vec![],
+            }],
             ..Default::default()
         }
         .build();
         let tail = String::from_utf8_lossy(&pdf[pdf.len() - 40..]).into_owned();
-        let xref_at: usize = tail.rsplit("startxref\n").next().unwrap().lines().next().unwrap().parse().unwrap();
+        let xref_at: usize = tail
+            .rsplit("startxref\n")
+            .next()
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(pdf[xref_at..].starts_with(b"xref"));
         let table = String::from_utf8_lossy(&pdf[xref_at..]).into_owned();
         let mut checked = 0;
-        for (i, line) in table.lines().skip(3).take_while(|l| l.ends_with(" n ")).enumerate() {
+        for (i, line) in table
+            .lines()
+            .skip(3)
+            .take_while(|l| l.ends_with(" n "))
+            .enumerate()
+        {
             let off: usize = line[..10].parse().unwrap();
-            assert!(pdf[off..].starts_with(format!("{} 0 obj", i + 1).as_bytes()), "object {}", i + 1);
+            assert!(
+                pdf[off..].starts_with(format!("{} 0 obj", i + 1).as_bytes()),
+                "object {}",
+                i + 1
+            );
             checked += 1;
         }
         assert!(checked >= 7);

@@ -5,7 +5,10 @@
 //! can never pass without exercising the engine; set `BDF_SKIP_PDFIUM=1` to
 //! skip them deliberately.
 
-use bdf_core::engine::{AnnotKind, DocId, Engine, LinkTarget, NewAnnot, OpenError, RegionReq, TileKey, TileKind, thumb_px};
+use bdf_core::engine::{
+    AnnotKind, DocId, Engine, LinkTarget, NewAnnot, OpenError, RegionReq, TileKey, TileKind,
+    thumb_px,
+};
 use bdf_core::geom::{PageSpace, Rotation, quantize_scale};
 use bdf_core::pdfium::PdfiumEngine;
 use bdf_core::testpdf::{LinkSpec, OutlineSpec, PageSpec, PdfSpec, long_document};
@@ -42,10 +45,23 @@ fn write(name: &str, bytes: &[u8]) -> PathBuf {
 fn sample() -> Vec<u8> {
     let mut p0 = PageSpec::letter()
         .with_text(72.0, 700.0, 24.0, "Hello BDF reader")
-        .with_text(72.0, 660.0, 12.0, "The quick brown fox jumps over the lazy dog.");
-    p0.links.push(([72.0, 600.0, 200.0, 620.0], LinkSpec::Page(2)));
-    p0.links.push(([72.0, 560.0, 200.0, 580.0], LinkSpec::Uri("https://example.com/x".into())));
-    let mut p1 = PageSpec { size: (842.0, 595.0), ..Default::default() }.with_text(72.0, 500.0, 14.0, "Landscape page");
+        .with_text(
+            72.0,
+            660.0,
+            12.0,
+            "The quick brown fox jumps over the lazy dog.",
+        );
+    p0.links
+        .push(([72.0, 600.0, 200.0, 620.0], LinkSpec::Page(2)));
+    p0.links.push((
+        [72.0, 560.0, 200.0, 580.0],
+        LinkSpec::Uri("https://example.com/x".into()),
+    ));
+    let mut p1 = PageSpec {
+        size: (842.0, 595.0),
+        ..Default::default()
+    }
+    .with_text(72.0, 500.0, 14.0, "Landscape page");
     p1.rects.push(([0.0, 0.0, 842.0, 100.0], [0.0, 0.0, 0.0]));
     let mut p2 = PageSpec::letter().with_text(72.0, 700.0, 14.0, "Rotated page text");
     p2.rotate = 90;
@@ -55,9 +71,17 @@ fn sample() -> Vec<u8> {
             OutlineSpec {
                 title: "Intro".into(),
                 page: 0,
-                children: vec![OutlineSpec { title: "Détails ✓".into(), page: 1, children: vec![] }],
+                children: vec![OutlineSpec {
+                    title: "Détails ✓".into(),
+                    page: 1,
+                    children: vec![],
+                }],
             },
-            OutlineSpec { title: "End".into(), page: 2, children: vec![] },
+            OutlineSpec {
+                title: "End".into(),
+                page: 2,
+                children: vec![],
+            },
         ],
         title: Some("Sample title".into()),
         author: Some("Tester".into()),
@@ -66,11 +90,21 @@ fn sample() -> Vec<u8> {
 }
 
 fn thumb(doc: DocId, page: u32) -> TileKey {
-    TileKey { doc, page, rotation: Rotation::R0, invert: false, generation: 0, kind: TileKind::Thumb }
+    TileKey {
+        doc,
+        page,
+        rotation: Rotation::R0,
+        invert: false,
+        generation: 0,
+        kind: TileKind::Thumb,
+    }
 }
 
 fn dark_fraction(rgba: &[u8]) -> f32 {
-    let dark = rgba.chunks_exact(4).filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300).count();
+    let dark = rgba
+        .chunks_exact(4)
+        .filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300)
+        .count();
     dark as f32 / (rgba.len() / 4) as f32
 }
 
@@ -91,10 +125,20 @@ fn opens_and_describes_a_document() {
     assert_eq!(info.outline[0].children[0].title, "Détails ✓");
     assert_eq!(info.outline[0].children[0].page, Some(1));
     assert_eq!(info.outline[1].page, Some(2));
-    assert!(info.metadata.contains(&("Title".into(), "Sample title".into())));
-    assert!(info.metadata.contains(&("CreationDate".into(), "2024-01-02 03:04:05 UTC".into())));
+    assert!(
+        info.metadata
+            .contains(&("Title".into(), "Sample title".into()))
+    );
+    assert!(
+        info.metadata
+            .contains(&("CreationDate".into(), "2024-01-02 03:04:05 UTC".into()))
+    );
     assert_eq!(info.pdf_version.as_deref(), Some("1.7"));
-    assert!(info.fingerprint.starts_with("id:00112233"), "{}", info.fingerprint);
+    assert!(
+        info.fingerprint.starts_with("id:00112233"),
+        "{}",
+        info.fingerprint
+    );
     assert!(!info.encrypted);
     assert!(info.page_labels.is_empty());
     e.close(DocId(1));
@@ -110,12 +154,23 @@ fn renders_tiles_thumbnails_regions_and_dark_mode() {
 
     let t = e.render(&thumb(doc, 0)).unwrap();
     assert_eq!((t.width, t.height), thumb_px((612.0, 792.0)));
-    assert!(dark_fraction(&t.rgba) > 0.0005, "thumbnail should show text");
+    assert!(
+        dark_fraction(&t.rgba) > 0.0005,
+        "thumbnail should show text"
+    );
     assert!(t.rgba.chunks_exact(4).all(|p| p[3] == 255));
 
     // Page 1 has a black band along its bottom 100pt.
     let scale = quantize_scale(1.0);
-    let key = TileKey { kind: TileKind::Tile { scale, tx: 0, ty: 0 }, page: 1, ..thumb(doc, 0) };
+    let key = TileKey {
+        kind: TileKind::Tile {
+            scale,
+            tx: 0,
+            ty: 0,
+        },
+        page: 1,
+        ..thumb(doc, 0)
+    };
     let img = e.render(&key).unwrap();
     assert_eq!((img.width, img.height), (842, 595));
     let px = |img: &bdf_core::engine::Image, x: u32, y: u32| {
@@ -126,14 +181,26 @@ fn renders_tiles_thumbnails_regions_and_dark_mode() {
     assert_eq!(px(&img, 400, 10), [255, 255, 255]);
 
     // Dark pages invert colours.
-    let inv = e.render(&TileKey { invert: true, ..key }).unwrap();
+    let inv = e
+        .render(&TileKey {
+            invert: true,
+            ..key
+        })
+        .unwrap();
     assert_eq!(px(&inv, 400, 590), [255, 255, 255]);
     assert_eq!(px(&inv, 400, 10), [0, 0, 0]);
 
     // A second tile row at 2x: tiles stitch into the full page.
     let scale2 = quantize_scale(2.0);
     let full = e
-        .render(&TileKey { kind: TileKind::Tile { scale: scale2, tx: 1, ty: 1 }, ..key })
+        .render(&TileKey {
+            kind: TileKind::Tile {
+                scale: scale2,
+                tx: 1,
+                ty: 1,
+            },
+            ..key
+        })
         .unwrap();
     assert_eq!((full.width, full.height), (1684 - 1024, 1190 - 1024));
     // Bottom band is black at 2x too.
@@ -141,14 +208,27 @@ fn renders_tiles_thumbnails_regions_and_dark_mode() {
 
     // A region (magnifier) matches the same pixels as the tile path.
     let r = e
-        .render_region(&RegionReq { doc, page: 1, rotation: Rotation::R0, invert: false, scale, x: 390, y: 580, w: 20, h: 15 })
+        .render_region(&RegionReq {
+            doc,
+            page: 1,
+            rotation: Rotation::R0,
+            invert: false,
+            scale,
+            x: 390,
+            y: 580,
+            w: 20,
+            h: 15,
+        })
         .unwrap();
     assert_eq!((r.width, r.height), (20, 15));
     assert_eq!(px(&r, 10, 12), [0, 0, 0]);
 
     // View rotation swaps the pixel size.
     let rot = e
-        .render(&TileKey { rotation: Rotation::R90, ..key })
+        .render(&TileKey {
+            rotation: Rotation::R90,
+            ..key
+        })
         .unwrap();
     assert_eq!((rot.width, rot.height), (595, 842));
 
@@ -159,7 +239,20 @@ fn renders_tiles_thumbnails_regions_and_dark_mode() {
     // Bad requests are errors, not crashes.
     assert!(e.render(&thumb(doc, 99)).is_err());
     assert!(e.render(&thumb(DocId(42), 0)).is_err());
-    assert!(e.render_region(&RegionReq { doc, page: 0, rotation: Rotation::R0, invert: false, scale, x: 0, y: 0, w: 0, h: 10 }).is_err());
+    assert!(
+        e.render_region(&RegionReq {
+            doc,
+            page: 0,
+            rotation: Rotation::R0,
+            invert: false,
+            scale,
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 10
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -182,8 +275,16 @@ fn text_links_and_geometry() {
     assert!(rects[0][0] > 72.0 && rects[0][2] < 400.0);
 
     assert_eq!(d.links.len(), 2);
-    assert!(d.links.iter().any(|l| matches!(l.target, LinkTarget::Page { page: 2, .. })));
-    assert!(d.links.iter().any(|l| l.target == LinkTarget::Uri("https://example.com/x".into())));
+    assert!(
+        d.links
+            .iter()
+            .any(|l| matches!(l.target, LinkTarget::Page { page: 2, .. }))
+    );
+    assert!(
+        d.links
+            .iter()
+            .any(|l| l.target == LinkTarget::Uri("https://example.com/x".into()))
+    );
 
     // Rotated page: our PageSpace agrees with PDFium's reported size.
     let info_size = (792.0, 612.0);
@@ -213,42 +314,116 @@ fn annotations_round_trip_through_an_in_place_save() {
     let rects = d.text.rects(m.start, m.end);
     let before = e.render(&thumb(doc, 0)).unwrap();
     let nm = e
-        .add_annot(doc, 0, &NewAnnot::Markup { kind: AnnotKind::Highlight, rects: rects.clone(), color: [255, 0, 0], text: "important".into() })
+        .add_annot(
+            doc,
+            0,
+            &NewAnnot::Markup {
+                kind: AnnotKind::Highlight,
+                rects: rects.clone(),
+                color: [255, 0, 0],
+                text: "important".into(),
+            },
+        )
         .unwrap();
     let note = e
-        .add_annot(doc, 0, &NewAnnot::Note { x: 400.0, y: 750.0, color: [255, 220, 0], text: "a note".into() })
+        .add_annot(
+            doc,
+            0,
+            &NewAnnot::Note {
+                x: 400.0,
+                y: 750.0,
+                color: [255, 220, 0],
+                text: "a note".into(),
+            },
+        )
         .unwrap();
     let ink = e
-        .add_annot(doc, 1, &NewAnnot::Ink { strokes: vec![vec![(100.0, 300.0), (200.0, 350.0), (300.0, 300.0)]], color: [0, 0, 255], width: 3.0 })
+        .add_annot(
+            doc,
+            1,
+            &NewAnnot::Ink {
+                strokes: vec![vec![(100.0, 300.0), (200.0, 350.0), (300.0, 300.0)]],
+                color: [0, 0, 255],
+                width: 3.0,
+            },
+        )
         .unwrap();
-    e.add_annot(doc, 1, &NewAnnot::Shape { kind: AnnotKind::Square, rect: [400.0, 200.0, 500.0, 300.0], color: [0, 128, 0], width: 2.0 })
-        .unwrap();
-    assert!(e.add_annot(doc, 0, &NewAnnot::Ink { strokes: vec![], color: [0, 0, 0], width: 1.0 }).is_err());
+    e.add_annot(
+        doc,
+        1,
+        &NewAnnot::Shape {
+            kind: AnnotKind::Square,
+            rect: [400.0, 200.0, 500.0, 300.0],
+            color: [0, 128, 0],
+            width: 2.0,
+        },
+    )
+    .unwrap();
+    assert!(
+        e.add_annot(
+            doc,
+            0,
+            &NewAnnot::Ink {
+                strokes: vec![],
+                color: [0, 0, 0],
+                width: 1.0
+            }
+        )
+        .is_err()
+    );
 
     // The highlight changes the rendered page.
     let after = e.render(&thumb(doc, 0)).unwrap();
-    let reddish = |img: &bdf_core::engine::Image| img.rgba.chunks_exact(4).filter(|p| p[0] > 200 && p[1] < 120 && p[2] < 120).count();
-    assert!(reddish(&after) > reddish(&before) + 20, "highlight should render");
+    let reddish = |img: &bdf_core::engine::Image| {
+        img.rgba
+            .chunks_exact(4)
+            .filter(|p| p[0] > 200 && p[1] < 120 && p[2] < 120)
+            .count()
+    };
+    assert!(
+        reddish(&after) > reddish(&before) + 20,
+        "highlight should render"
+    );
 
     let d = e.page_data(doc, 0).unwrap();
-    let hl = d.annots.iter().find(|a| a.name.as_deref() == Some(&nm)).expect("highlight listed");
+    let hl = d
+        .annots
+        .iter()
+        .find(|a| a.name.as_deref() == Some(&nm))
+        .expect("highlight listed");
     assert_eq!(hl.kind, AnnotKind::Highlight);
     assert_eq!(hl.contents, "important");
     // PDFium only reports /C while an annotation has no appearance stream.
     assert!(hl.color.is_none() || hl.color == Some([255, 0, 0]));
-    assert!(d.annots.iter().any(|a| a.name.as_deref() == Some(&note) && a.kind == AnnotKind::Note));
+    assert!(
+        d.annots
+            .iter()
+            .any(|a| a.name.as_deref() == Some(&note) && a.kind == AnnotKind::Note)
+    );
     let d1 = e.page_data(doc, 1).unwrap();
-    assert!(d1.annots.iter().any(|a| a.name.as_deref() == Some(&ink) && a.kind == AnnotKind::Ink));
+    assert!(
+        d1.annots
+            .iter()
+            .any(|a| a.name.as_deref() == Some(&ink) && a.kind == AnnotKind::Ink)
+    );
     assert!(d1.annots.iter().any(|a| a.kind == AnnotKind::Square));
 
-    e.set_annot_contents(doc, 0, 0, Some(&note), "edited note").unwrap();
+    e.set_annot_contents(doc, 0, 0, Some(&note), "edited note")
+        .unwrap();
 
     // Save over the open file.
     e.save(doc, &path).unwrap();
     let saved = std::fs::read(&path).unwrap();
     assert!(saved.len() > original.len());
-    assert_eq!(&saved[..original.len()], &original[..], "incremental save keeps the original bytes");
-    assert!(!tmp("annots.bdf-saving.pdf").exists(), "temp file cleaned up");
+    assert_eq!(
+        &saved[..original.len()],
+        &original[..],
+        "incremental save keeps the original bytes"
+    );
+    assert!(
+        !tmp("annots.bdf-saving.pdf").exists(),
+        "temp file cleaned up"
+    );
 
     // Still usable after the save, and the data is there.
     let d = e.page_data(doc, 0).unwrap();
@@ -258,7 +433,13 @@ fn annotations_round_trip_through_an_in_place_save() {
     let mut e2 = engine().unwrap();
     e2.open(DocId(9), &path, None).unwrap();
     let d = e2.page_data(DocId(9), 0).unwrap();
-    assert_eq!(d.annots.iter().filter(|a| a.kind == AnnotKind::Highlight).count(), 1);
+    assert_eq!(
+        d.annots
+            .iter()
+            .filter(|a| a.kind == AnnotKind::Highlight)
+            .count(),
+        1
+    );
     drop(e2);
 
     // Remove by name, then save as a new file.
@@ -278,17 +459,42 @@ fn passwords() {
     let _serial = serial();
     let Some(mut e) = engine() else { return };
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/encrypted-rc4.pdf");
-    assert_eq!(e.open(DocId(1), &fixture, None).unwrap_err(), OpenError::PasswordRequired);
-    assert_eq!(e.open(DocId(1), &fixture, Some("wrong")).unwrap_err(), OpenError::WrongPassword);
+    assert_eq!(
+        e.open(DocId(1), &fixture, None).unwrap_err(),
+        OpenError::PasswordRequired
+    );
+    assert_eq!(
+        e.open(DocId(1), &fixture, Some("wrong")).unwrap_err(),
+        OpenError::WrongPassword
+    );
     let info = e.open(DocId(1), &fixture, Some("bdf-secret")).unwrap();
     assert!(info.encrypted);
-    assert!(e.page_data(DocId(1), 0).unwrap().text.all().contains("Secret PAGE-1"));
+    assert!(
+        e.page_data(DocId(1), 0)
+            .unwrap()
+            .text
+            .all()
+            .contains("Secret PAGE-1")
+    );
     // Saving an encrypted document keeps it encrypted and openable with the password.
     let copy = tmp("encrypted-copy.pdf");
-    e.add_annot(DocId(1), 0, &NewAnnot::Note { x: 10.0, y: 780.0, color: [255, 255, 0], text: "x".into() }).unwrap();
+    e.add_annot(
+        DocId(1),
+        0,
+        &NewAnnot::Note {
+            x: 10.0,
+            y: 780.0,
+            color: [255, 255, 0],
+            text: "x".into(),
+        },
+    )
+    .unwrap();
     e.save(DocId(1), &copy).unwrap();
     let mut e2 = engine().unwrap();
-    assert_eq!(e2.open(DocId(2), &copy, None).unwrap_err(), OpenError::PasswordRequired);
+    assert_eq!(
+        e2.open(DocId(2), &copy, None).unwrap_err(),
+        OpenError::PasswordRequired
+    );
     e2.open(DocId(2), &copy, Some("bdf-secret")).unwrap();
 }
 
@@ -296,9 +502,21 @@ fn passwords() {
 fn bad_input_never_panics() {
     let _serial = serial();
     let Some(mut e) = engine() else { return };
-    assert_eq!(e.open(DocId(1), &tmp("does-not-exist.pdf"), None).unwrap_err(), OpenError::NotFound);
-    assert_eq!(e.open(DocId(1), &write("empty.pdf", b""), None).unwrap_err(), OpenError::NotPdf);
-    assert_eq!(e.open(DocId(1), &write("text.pdf", b"hello, not a pdf"), None).unwrap_err(), OpenError::NotPdf);
+    assert_eq!(
+        e.open(DocId(1), &tmp("does-not-exist.pdf"), None)
+            .unwrap_err(),
+        OpenError::NotFound
+    );
+    assert_eq!(
+        e.open(DocId(1), &write("empty.pdf", b""), None)
+            .unwrap_err(),
+        OpenError::NotPdf
+    );
+    assert_eq!(
+        e.open(DocId(1), &write("text.pdf", b"hello, not a pdf"), None)
+            .unwrap_err(),
+        OpenError::NotPdf
+    );
     let _ = e.open(DocId(1), tmp("").as_path(), None).unwrap_err();
 
     // Truncated and corrupted copies: either open (PDFium repairs) or fail
@@ -339,7 +557,10 @@ fn bad_input_never_panics() {
         }
         let _ = std::fs::remove_file(&p);
     }
-    assert!(opened > 10, "PDFium should repair many damaged files ({opened} opened)");
+    assert!(
+        opened > 10,
+        "PDFium should repair many damaged files ({opened} opened)"
+    );
 }
 
 #[test]
@@ -357,7 +578,14 @@ fn large_documents_open_fast_and_memory_stays_bounded() {
     let t0 = Instant::now();
     let scale = quantize_scale(1.5);
     for page in [0u32, 999, 1999] {
-        let k = TileKey { kind: TileKind::Tile { scale, tx: 0, ty: 0 }, ..thumb(DocId(1), page) };
+        let k = TileKey {
+            kind: TileKind::Tile {
+                scale,
+                tx: 0,
+                ty: 0,
+            },
+            ..thumb(DocId(1), page)
+        };
         let img = e.render(&k).unwrap();
         assert!(dark_fraction(&img.rgba) > 0.01);
     }

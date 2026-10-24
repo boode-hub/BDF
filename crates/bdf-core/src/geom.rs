@@ -268,7 +268,10 @@ mod tests {
             let s = PageSpace::new(bbox, Rotation::from_quarters(q));
             for &(x, y) in &[(0.0, 3.0), (17.5, 400.25), (399.0, 899.0), (-5.0, 900.0)] {
                 let d = s.to_display(x, y);
-                assert!(close(s.to_user(d.0, d.1), (x, y)), "q={q} ({x},{y}) -> {d:?}");
+                assert!(
+                    close(s.to_user(d.0, d.1), (x, y)),
+                    "q={q} ({x},{y}) -> {d:?}"
+                );
                 let (w, h) = s.size();
                 assert!(d.0 >= -1e-3 && d.0 <= w + 1e-3 && d.1 >= -1e-3 && d.1 <= h + 1e-3);
             }

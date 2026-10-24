@@ -59,7 +59,11 @@ fn parse_args() -> Result<Args, String> {
             "-V" | "--version" => a.version = true,
             "-p" | "--page" => {
                 let n = it.next().ok_or("--page needs a number")?;
-                a.page = Some(n.to_string_lossy().parse().map_err(|_| "--page needs a number")?);
+                a.page = Some(
+                    n.to_string_lossy()
+                        .parse()
+                        .map_err(|_| "--page needs a number")?,
+                );
             }
             "--renderer" => {
                 let r = it.next().ok_or("--renderer needs gl or wgpu")?;
@@ -71,7 +75,9 @@ fn parse_args() -> Result<Args, String> {
             }
             "--bench" => {
                 let file = match it.peek() {
-                    Some(n) if !n.to_string_lossy().starts_with('-') => it.next().map(PathBuf::from),
+                    Some(n) if !n.to_string_lossy().starts_with('-') => {
+                        it.next().map(PathBuf::from)
+                    }
                     _ => None,
                 };
                 a.bench = Some(file);
@@ -79,7 +85,10 @@ fn parse_args() -> Result<Args, String> {
             "--report" => a.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--generate" => {
                 let n = it.next().ok_or("--generate needs a page count")?;
-                let n: usize = n.to_string_lossy().parse().map_err(|_| "--generate needs a page count")?;
+                let n: usize = n
+                    .to_string_lossy()
+                    .parse()
+                    .map_err(|_| "--generate needs a page count")?;
                 let p = it.next().ok_or("--generate needs an output path")?;
                 a.generate = Some((n, p.into()));
             }
@@ -123,7 +132,12 @@ fn main() -> ExitCode {
 
     let data = DataDir::locate();
     logger::init(&data.log_file(), cfg!(debug_assertions));
-    log::info!("BDF {} starting; data in {} (portable: {})", env!("CARGO_PKG_VERSION"), data.path.display(), data.portable);
+    log::info!(
+        "BDF {} starting; data in {} (portable: {})",
+        env!("CARGO_PKG_VERSION"),
+        data.path.display(),
+        data.portable
+    );
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("panic: {info}");
@@ -143,7 +157,10 @@ fn main() -> ExitCode {
                 p
             });
             files = vec![file.clone()];
-            let report = args.report.clone().unwrap_or_else(|| PathBuf::from("bdf-bench.json"));
+            let report = args
+                .report
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("bdf-bench.json"));
             Some(bench::Bench::new(file, report, launched))
         }
         None => None,
@@ -175,9 +192,18 @@ fn main() -> ExitCode {
     if settings.maximized && args.bench.is_none() {
         viewport = viewport.with_maximized(true);
     }
-    let options = eframe::NativeOptions { viewport, renderer, ..Default::default() };
+    let options = eframe::NativeOptions {
+        viewport,
+        renderer,
+        ..Default::default()
+    };
 
-    let start = app::StartOptions { files, page: args.page, bench, renderer: renderer_name };
+    let start = app::StartOptions {
+        files,
+        page: args.page,
+        bench,
+        renderer: renderer_name,
+    };
     let result = eframe::run_native(
         "BDF",
         options,
@@ -190,13 +216,21 @@ fn main() -> ExitCode {
             // OpenGL is missing on some virtual machines and remote desktops:
             // start again with DirectX / Vulkan / Metal (a process can only
             // create one window event loop, so this needs a fresh process).
-            if pref == RendererPref::Auto && std::env::var_os("BDF_NO_FALLBACK").is_none() {
-                if let Ok(exe) = std::env::current_exe() {
-                    let mut cmd = std::process::Command::new(exe);
-                    cmd.args(std::env::args_os().skip(1)).arg("--renderer").arg("wgpu").env("BDF_NO_FALLBACK", "1");
-                    if let Ok(status) = cmd.status() {
-                        return if status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
-                    }
+            if pref == RendererPref::Auto
+                && std::env::var_os("BDF_NO_FALLBACK").is_none()
+                && let Ok(exe) = std::env::current_exe()
+            {
+                let mut cmd = std::process::Command::new(exe);
+                cmd.args(std::env::args_os().skip(1))
+                    .arg("--renderer")
+                    .arg("wgpu")
+                    .env("BDF_NO_FALLBACK", "1");
+                if let Ok(status) = cmd.status() {
+                    return if status.success() {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::FAILURE
+                    };
                 }
             }
             platform::attach_console();

@@ -282,14 +282,26 @@ impl fmt::Display for OpenError {
 pub type EResult<T> = Result<T, String>;
 
 pub trait Engine {
-    fn open(&mut self, id: DocId, path: &Path, password: Option<&str>) -> Result<DocInfo, OpenError>;
+    fn open(
+        &mut self,
+        id: DocId,
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<DocInfo, OpenError>;
     fn close(&mut self, id: DocId);
     /// Renders a tile or thumbnail.
     fn render(&mut self, key: &TileKey) -> EResult<Image>;
     fn render_region(&mut self, req: &RegionReq) -> EResult<Image>;
     /// Renders a whole page (no view rotation) at an exact pixel size, for
     /// printing and export.
-    fn render_page(&mut self, id: DocId, page: u32, w: u32, h: u32, printing: bool) -> EResult<Image>;
+    fn render_page(
+        &mut self,
+        id: DocId,
+        page: u32,
+        w: u32,
+        h: u32,
+        printing: bool,
+    ) -> EResult<Image>;
     /// Display size of a page in points, if the document is open.
     fn page_size(&self, id: DocId, page: u32) -> Option<(f32, f32)>;
     fn page_data(&mut self, id: DocId, page: u32) -> EResult<PageData>;
@@ -298,15 +310,33 @@ pub trait Engine {
     fn annotations(&mut self, id: DocId, page: u32) -> EResult<Vec<AnnotInfo>>;
     /// Adds an annotation and returns its `/NM`.
     fn add_annot(&mut self, id: DocId, page: u32, annot: &NewAnnot) -> EResult<String>;
-    fn remove_annot(&mut self, id: DocId, page: u32, index: usize, name: Option<&str>) -> EResult<()>;
-    fn set_annot_contents(&mut self, id: DocId, page: u32, index: usize, name: Option<&str>, text: &str) -> EResult<()>;
+    fn remove_annot(
+        &mut self,
+        id: DocId,
+        page: u32,
+        index: usize,
+        name: Option<&str>,
+    ) -> EResult<()>;
+    fn set_annot_contents(
+        &mut self,
+        id: DocId,
+        page: u32,
+        index: usize,
+        name: Option<&str>,
+        text: &str,
+    ) -> EResult<()>;
     /// Saves to `target` (which may be the open file) and keeps the document open.
     fn save(&mut self, id: DocId, target: &Path) -> EResult<()>;
 }
 
 /// Converts the display-space rect of a region request into a [`Rect`].
 pub fn region_rect(r: &RegionReq) -> Rect {
-    Rect::new(r.x as f32, r.y as f32, r.x as f32 + r.w as f32, r.y as f32 + r.h as f32)
+    Rect::new(
+        r.x as f32,
+        r.y as f32,
+        r.x as f32 + r.w as f32,
+        r.y as f32 + r.h as f32,
+    )
 }
 
 #[cfg(test)]
@@ -349,7 +379,11 @@ mod tests {
 
     #[test]
     fn invert_keeps_alpha() {
-        let mut i = Image { width: 1, height: 1, rgba: vec![10, 20, 30, 255] };
+        let mut i = Image {
+            width: 1,
+            height: 1,
+            rgba: vec![10, 20, 30, 255],
+        };
         i.invert();
         assert_eq!(i.rgba, vec![245, 235, 225, 255]);
     }

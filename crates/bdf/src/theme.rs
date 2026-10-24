@@ -31,7 +31,6 @@ pub mod icon {
     pub const ROTATE_CW: &str = "\u{E036}";
     pub const ROTATE_CCW: &str = "\u{E038}";
     pub const SPLIT_H: &str = "\u{E870}";
-    pub const SPLIT_V: &str = "\u{E874}";
     pub const BOOKMARK: &str = "\u{E0EA}";
     pub const BOOKMARKS: &str = "\u{E5F0}";
     pub const OUTLINE: &str = "\u{E2F2}";
@@ -41,8 +40,6 @@ pub mod icon {
     pub const SUN: &str = "\u{E472}";
     pub const PDF: &str = "\u{E702}";
     pub const RECENT: &str = "\u{E1A0}";
-    pub const FULLSCREEN: &str = "\u{E0A2}";
-    pub const EXIT_FULLSCREEN: &str = "\u{E09A}";
     pub const BOOK: &str = "\u{E0E6}";
     pub const COPY: &str = "\u{E1CA}";
     pub const TRASH: &str = "\u{E4A6}";
@@ -55,16 +52,13 @@ pub mod icon {
     pub const FORWARD: &str = "\u{E06C}";
     pub const COMMENT: &str = "\u{E17A}";
     pub const LINK: &str = "\u{E2E2}";
-    pub const MORE: &str = "\u{E208}";
     pub const CHECK: &str = "\u{E182}";
     pub const WARNING: &str = "\u{E4E0}";
     pub const FIT_WIDTH: &str = "\u{E0A0}";
     pub const FIT_PAGE: &str = "\u{E1D0}";
     pub const LOCK: &str = "\u{E2FA}";
     pub const PLUS: &str = "\u{E3D4}";
-    pub const MINUS: &str = "\u{E32A}";
     pub const SCROLL: &str = "\u{EB7A}";
-    pub const EYE: &str = "\u{E220}";
     pub const COLUMNS: &str = "\u{E546}";
     pub const FILE: &str = "\u{E230}";
 }
@@ -142,16 +136,24 @@ pub fn apply_both(ctx: &egui::Context) {
         s.spacing.interact_size.y = 26.0;
         s.interaction.tooltip_delay = 0.35;
         use egui::{FontId, TextStyle};
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(14.0));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(14.0));
-        s.text_styles.insert(TextStyle::Small, FontId::proportional(11.5));
-        s.text_styles.insert(TextStyle::Heading, FontId::proportional(20.0));
+        s.text_styles
+            .insert(TextStyle::Body, FontId::proportional(14.0));
+        s.text_styles
+            .insert(TextStyle::Button, FontId::proportional(14.0));
+        s.text_styles
+            .insert(TextStyle::Small, FontId::proportional(11.5));
+        s.text_styles
+            .insert(TextStyle::Heading, FontId::proportional(20.0));
     });
 }
 
 fn visuals(dark: bool) -> Visuals {
     let p = palette(dark);
-    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+    let mut v = if dark {
+        Visuals::dark()
+    } else {
+        Visuals::light()
+    };
     let r6 = CornerRadius::same(6);
     if dark {
         v.panel_fill = Color32::from_rgb(40, 42, 46);
@@ -183,9 +185,17 @@ fn visuals(dark: bool) -> Visuals {
     // Flat buttons: no fill until hovered.
     v.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.hovered.weak_bg_fill = if dark { Color32::from_gray(62) } else { Color32::from_gray(228) };
+    v.widgets.hovered.weak_bg_fill = if dark {
+        Color32::from_gray(62)
+    } else {
+        Color32::from_gray(228)
+    };
     v.widgets.hovered.bg_stroke = Stroke::NONE;
-    v.widgets.active.weak_bg_fill = if dark { Color32::from_gray(72) } else { Color32::from_gray(214) };
+    v.widgets.active.weak_bg_fill = if dark {
+        Color32::from_gray(72)
+    } else {
+        Color32::from_gray(214)
+    };
     v.widgets.open.weak_bg_fill = v.widgets.hovered.weak_bg_fill;
     v
 }
@@ -222,5 +232,9 @@ pub fn window_icon() -> egui::IconData {
             rgba[i + 3] = (alpha * 255.0) as u8;
         }
     }
-    egui::IconData { rgba, width: n as u32, height: n as u32 }
+    egui::IconData {
+        rgba,
+        width: n as u32,
+        height: n as u32,
+    }
 }

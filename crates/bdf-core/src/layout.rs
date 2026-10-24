@@ -121,7 +121,10 @@ impl Layout {
         }
 
         let row_width = |&(first, count): &(usize, usize)| -> f32 {
-            rotated[first..first + count].iter().map(|s| s.0).sum::<f32>()
+            rotated[first..first + count]
+                .iter()
+                .map(|s| s.0)
+                .sum::<f32>()
                 + gap * (count.saturating_sub(1)) as f32
         };
         // In facing modes a lone cover page sits on the right, like a book.
@@ -197,11 +200,10 @@ impl Layout {
 
     /// Pages overlapping the band, in order.
     pub fn pages_in(&self, y0: f32, y1: f32) -> impl Iterator<Item = usize> + '_ {
-        self.rows_in(y0, y1)
-            .flat_map(move |ri| {
-                let r = &self.rows[ri];
-                r.first..r.first + r.count
-            })
+        self.rows_in(y0, y1).flat_map(move |ri| {
+            let r = &self.rows[ri];
+            r.first..r.first + r.count
+        })
     }
 
     /// Page under a point, if any.
@@ -259,14 +261,21 @@ impl Layout {
             return self.fit_width_zoom(viewport_w);
         };
         let r = &self.rows[ri];
-        let mut w: f32 = self.pages[r.first..r.first + r.count].iter().map(|p| p.width()).sum::<f32>()
+        let mut w: f32 = self.pages[r.first..r.first + r.count]
+            .iter()
+            .map(|p| p.width())
+            .sum::<f32>()
             + self.gap * (r.count.saturating_sub(1)) as f32;
         // A lone cover page in a facing layout counts as a full spread.
         if r.count == 1 && self.rows.iter().any(|x| x.count == 2) {
             w = w * 2.0 + self.gap;
         }
         let w = w + 2.0 * self.gap;
-        if w <= 0.0 { 1.0 } else { (viewport_w / w).max(0.01) }
+        if w <= 0.0 {
+            1.0
+        } else {
+            (viewport_w / w).max(0.01)
+        }
     }
 
     /// Zoom that makes the row containing `page` fit the viewport entirely.
@@ -341,7 +350,10 @@ mod tests {
         assert_eq!(l.rows[1].count, 2);
         let mid = l.width * 0.5;
         assert!(l.pages[0].x0 > mid - 1.0, "cover should be right of centre");
-        assert!(l.pages[3].x1 < mid + 1.0, "trailing page should be left of centre");
+        assert!(
+            l.pages[3].x1 < mid + 1.0,
+            "trailing page should be left of centre"
+        );
         assert!(l.pages[1].x1 < l.pages[2].x0);
     }
 
@@ -354,7 +366,10 @@ mod tests {
         };
         let l = Layout::new(&letter(5), &p);
         assert_eq!(
-            l.rows.iter().map(|r| (r.first, r.count)).collect::<Vec<_>>(),
+            l.rows
+                .iter()
+                .map(|r| (r.first, r.count))
+                .collect::<Vec<_>>(),
             vec![(0, 2), (2, 2), (4, 1)]
         );
     }
@@ -374,10 +389,18 @@ mod tests {
     fn visibility_queries() {
         let l = Layout::new(&letter(100), &LayoutParams::default());
         let row_h = 792.0 + 12.0;
-        let v: Vec<usize> = l.pages_in(row_h * 10.0 + 100.0, row_h * 11.0 + 100.0).collect();
+        let v: Vec<usize> = l
+            .pages_in(row_h * 10.0 + 100.0, row_h * 11.0 + 100.0)
+            .collect();
         assert_eq!(v, vec![10, 11]);
-        assert_eq!(l.current_page(row_h * 10.0 + 100.0, row_h * 11.0 + 100.0), 10);
-        assert_eq!(l.current_page(row_h * 10.0 + 500.0, row_h * 11.0 + 500.0), 11);
+        assert_eq!(
+            l.current_page(row_h * 10.0 + 100.0, row_h * 11.0 + 100.0),
+            10
+        );
+        assert_eq!(
+            l.current_page(row_h * 10.0 + 500.0, row_h * 11.0 + 500.0),
+            11
+        );
         assert_eq!(l.page_at(300.0, row_h * 42.0 + 50.0), Some(42));
         assert_eq!(l.page_at(5.0, row_h * 42.0 + 50.0), None); // in the margin
         assert_eq!(l.nearest_page(5.0, row_h * 42.0 + 50.0), Some(42));
@@ -398,7 +421,10 @@ mod tests {
         let l = Layout::new(&[(612.0, 792.0), (792.0, 612.0)], &LayoutParams::default());
         assert!((l.fit_row_width_zoom(0, 636.0) - 1.0).abs() < 1e-6);
         assert!((l.fit_row_width_zoom(1, 816.0) - 1.0).abs() < 1e-6);
-        let p = LayoutParams { mode: PageMode::ContinuousFacing, ..Default::default() };
+        let p = LayoutParams {
+            mode: PageMode::ContinuousFacing,
+            ..Default::default()
+        };
         let l = Layout::new(&[(612.0, 792.0); 3], &p);
         // The cover fits as if it were a spread, like the pair after it.
         assert!((l.fit_row_width_zoom(0, 1260.0) - l.fit_row_width_zoom(1, 1260.0)).abs() < 1e-6);

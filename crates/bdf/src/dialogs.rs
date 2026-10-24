@@ -5,7 +5,9 @@ use crate::theme::{self, icon};
 use bdf_core::engine::{AnnotKind, NewAnnot};
 use bdf_core::layout::PageMode;
 use bdf_core::settings::{RendererPref, ThemePref, ZoomPref};
-use eframe::egui::{self, Align, Button, Context, Id, Key, Layout, Modal, RichText, TextEdit, Ui, vec2};
+use eframe::egui::{
+    self, Align, Button, Context, Id, Key, Layout, Modal, RichText, TextEdit, Ui, vec2,
+};
 
 enum Outcome {
     Keep,
@@ -19,13 +21,21 @@ fn buttons(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 
 fn primary(ui: &mut Ui, label: &str) -> bool {
     let pal = theme::palette(ui.visuals().dark_mode);
-    ui.add(Button::new(RichText::new(label).color(egui::Color32::WHITE)).fill(pal.accent).min_size(vec2(84.0, 28.0)))
-        .clicked()
+    ui.add(
+        Button::new(RichText::new(label).color(egui::Color32::WHITE))
+            .fill(pal.accent)
+            .min_size(vec2(84.0, 28.0)),
+    )
+    .clicked()
 }
 
 fn secondary(ui: &mut Ui, label: &str) -> bool {
-    ui.add(Button::new(label).min_size(vec2(84.0, 28.0)).stroke(ui.visuals().widgets.noninteractive.bg_stroke))
-        .clicked()
+    ui.add(
+        Button::new(label)
+            .min_size(vec2(84.0, 28.0))
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke),
+    )
+    .clicked()
 }
 
 /// Only web and mail links open; everything else (file:, javascript:, …) is shown but not followed.
@@ -36,7 +46,9 @@ pub fn is_safe_uri(u: &str) -> bool {
 
 impl BdfApp {
     pub fn dialogs(&mut self, ctx: &Context) {
-        let Some(mut dialog) = self.dialog.take() else { return };
+        let Some(mut dialog) = self.dialog.take() else {
+            return;
+        };
         let outcome = self.dialog_ui(ctx, &mut dialog);
         match outcome {
             Outcome::Keep => {
@@ -65,15 +77,30 @@ impl BdfApp {
         let mut outcome = Outcome::Keep;
         let modal = Modal::new(Id::unique("bdf-dialog"));
         match dialog {
-            Dialog::Password { doc: _, path, pane, input, error } => {
-                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            Dialog::Password {
+                path,
+                pane,
+                input,
+                error,
+            } => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 let mut submit = false;
                 modal.show(ctx, |ui| {
                     ui.set_width(380.0);
                     ui.heading(format!("{}  Password required", icon::LOCK));
-                    ui.label(format!("“{name}” is protected. Enter its password to open it."));
+                    ui.label(format!(
+                        "“{name}” is protected. Enter its password to open it."
+                    ));
                     ui.add_space(6.0);
-                    let r = ui.add(TextEdit::singleline(input).password(true).hint_text("Password").desired_width(f32::INFINITY));
+                    let r = ui.add(
+                        TextEdit::singleline(input)
+                            .password(true)
+                            .hint_text("Password")
+                            .desired_width(f32::INFINITY),
+                    );
                     r.request_focus();
                     if let Some(e) = error {
                         ui.colored_label(theme::palette(ui.visuals().dark_mode).danger, e.as_str());
@@ -93,7 +120,12 @@ impl BdfApp {
                     outcome = Outcome::Close;
                 }
             }
-            Dialog::Note { doc, page, target, text } => {
+            Dialog::Note {
+                doc,
+                page,
+                target,
+                text,
+            } => {
                 let mut save = false;
                 modal.show(ctx, |ui| {
                     ui.set_width(420.0);
@@ -103,7 +135,12 @@ impl BdfApp {
                         NoteTarget::Edit(_) => "Comment",
                     };
                     ui.heading(format!("{}  {title}", icon::NOTE));
-                    let r = ui.add(TextEdit::multiline(text).desired_rows(6).desired_width(f32::INFINITY).hint_text("Type your note…"));
+                    let r = ui.add(
+                        TextEdit::multiline(text)
+                            .desired_rows(6)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("Type your note…"),
+                    );
                     if !r.has_focus() && ui.memory(|m| m.focused().is_none()) {
                         r.request_focus();
                     }
@@ -126,10 +163,21 @@ impl BdfApp {
                         NoteTarget::New((x, y)) => {
                             if !text.trim().is_empty() {
                                 let color = [255, 213, 0];
-                                self.add_annot(doc, page, NewAnnot::Note { x, y, color, text: text.clone() });
+                                self.add_annot(
+                                    doc,
+                                    page,
+                                    NewAnnot::Note {
+                                        x,
+                                        y,
+                                        color,
+                                        text: text.clone(),
+                                    },
+                                );
                             }
                         }
-                        NoteTarget::Edit(info) => self.set_annot_text(doc, page, &info, text.clone()),
+                        NoteTarget::Edit(info) => {
+                            self.set_annot_text(doc, page, &info, text.clone())
+                        }
                     }
                     outcome = Outcome::Close;
                 }
@@ -142,7 +190,10 @@ impl BdfApp {
                     ui.label("This document links to:");
                     ui.add(egui::Label::new(RichText::new(u.as_str()).monospace()).wrap());
                     if !safe {
-                        ui.colored_label(theme::palette(ui.visuals().dark_mode).danger, "Only web and e-mail links can be opened from BDF.");
+                        ui.colored_label(
+                            theme::palette(ui.visuals().dark_mode).danger,
+                            "Only web and e-mail links can be opened from BDF.",
+                        );
                     }
                     buttons(ui, |ui| {
                         if safe && primary(ui, "Open in browser") {
@@ -185,7 +236,12 @@ impl BdfApp {
                 });
             }
             Dialog::ConfirmQuit => {
-                let dirty: Vec<_> = self.docs.values().filter(|d| d.dirty).map(|d| (d.id, d.title())).collect();
+                let dirty: Vec<_> = self
+                    .docs
+                    .values()
+                    .filter(|d| d.dirty)
+                    .map(|d| (d.id, d.title()))
+                    .collect();
                 modal.show(ctx, |ui| {
                     ui.set_width(420.0);
                     ui.heading("Unsaved changes");
@@ -219,7 +275,10 @@ impl BdfApp {
                 modal.show(ctx, |ui| {
                     ui.set_width(380.0);
                     ui.heading(format!("{}  Delete annotation?", icon::TRASH));
-                    ui.label(format!("This {} was not added in this session, so deleting it cannot be undone.", info.kind.label().to_lowercase()));
+                    ui.label(format!(
+                        "This {} was not added in this session, so deleting it cannot be undone.",
+                        info.kind.label().to_lowercase()
+                    ));
                     buttons(ui, |ui| {
                         if primary(ui, "Delete") {
                             yes = true;
@@ -236,32 +295,63 @@ impl BdfApp {
                 }
             }
             Dialog::Properties(doc) => {
-                let Some(d) = self.docs.get(doc) else { return Outcome::Close };
+                let Some(d) = self.docs.get(doc) else {
+                    return Outcome::Close;
+                };
                 let info = d.info.clone();
                 let path = d.path.clone();
                 modal.show(ctx, |ui| {
                     ui.set_width(520.0);
                     ui.heading(format!("{}  Document properties", icon::INFO));
                     ui.add_space(4.0);
-                    egui::Grid::new("props").num_columns(2).striped(true).spacing(vec2(14.0, 6.0)).show(ui, |ui| {
-                        let mut row = |k: &str, v: String| {
-                            ui.label(RichText::new(k).strong());
-                            ui.add(egui::Label::new(v).wrap());
-                            ui.end_row();
-                        };
-                        row("File", path.display().to_string());
-                        row("Size", format!("{:.2} MB ({} bytes)", info.file_size as f64 / 1_048_576.0, info.file_size));
-                        row("Pages", info.page_sizes.len().to_string());
-                        if let Some((w, h)) = info.page_sizes.first() {
-                            row("Page size", format!("{:.0} × {:.0} pt ({:.1} × {:.1} mm)", w, h, w / 72.0 * 25.4, h / 72.0 * 25.4));
-                        }
-                        row("PDF version", info.pdf_version.clone().unwrap_or_else(|| "unknown".into()));
-                        row("Encrypted", if info.encrypted { "yes" } else { "no" }.into());
-                        row("Form fields", if info.form_fields { "yes" } else { "no" }.into());
-                        for (k, v) in &info.metadata {
-                            row(k, v.clone());
-                        }
-                    });
+                    egui::Grid::new("props")
+                        .num_columns(2)
+                        .striped(true)
+                        .spacing(vec2(14.0, 6.0))
+                        .show(ui, |ui| {
+                            let mut row = |k: &str, v: String| {
+                                ui.label(RichText::new(k).strong());
+                                ui.add(egui::Label::new(v).wrap());
+                                ui.end_row();
+                            };
+                            row("File", path.display().to_string());
+                            row(
+                                "Size",
+                                format!(
+                                    "{:.2} MB ({} bytes)",
+                                    info.file_size as f64 / 1_048_576.0,
+                                    info.file_size
+                                ),
+                            );
+                            row("Pages", info.page_sizes.len().to_string());
+                            if let Some((w, h)) = info.page_sizes.first() {
+                                row(
+                                    "Page size",
+                                    format!(
+                                        "{:.0} × {:.0} pt ({:.1} × {:.1} mm)",
+                                        w,
+                                        h,
+                                        w / 72.0 * 25.4,
+                                        h / 72.0 * 25.4
+                                    ),
+                                );
+                            }
+                            row(
+                                "PDF version",
+                                info.pdf_version.clone().unwrap_or_else(|| "unknown".into()),
+                            );
+                            row(
+                                "Encrypted",
+                                if info.encrypted { "yes" } else { "no" }.into(),
+                            );
+                            row(
+                                "Form fields",
+                                if info.form_fields { "yes" } else { "no" }.into(),
+                            );
+                            for (k, v) in &info.metadata {
+                                row(k, v.clone());
+                            }
+                        });
                     buttons(ui, |ui| {
                         if primary(ui, "Close") {
                             outcome = Outcome::Close;
@@ -276,76 +366,121 @@ impl BdfApp {
                     ui.add_space(6.0);
                     let s = &mut self.settings;
                     let before = s.clone();
-                    egui::Grid::new("prefs").num_columns(2).spacing(vec2(16.0, 10.0)).show(ui, |ui| {
-                        ui.label("Theme");
-                        ui.horizontal(|ui| {
-                            ui.radio_value(&mut s.theme, ThemePref::System, "System");
-                            ui.radio_value(&mut s.theme, ThemePref::Light, "Light");
-                            ui.radio_value(&mut s.theme, ThemePref::Dark, "Dark");
-                        });
-                        ui.end_row();
-                        ui.label("Page layout");
-                        egui::ComboBox::from_id_salt("pref-layout").selected_text(s.page_mode.label()).show_ui(ui, |ui| {
-                            for m in PageMode::ALL {
-                                ui.selectable_value(&mut s.page_mode, m, m.label());
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Opening zoom");
-                        egui::ComboBox::from_id_salt("pref-zoom")
-                            .selected_text(match s.default_zoom {
-                                ZoomPref::FitWidth => "Fit width",
-                                ZoomPref::FitPage => "Fit page",
-                                ZoomPref::Actual => "Actual size",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut s.default_zoom, ZoomPref::FitWidth, "Fit width");
-                                ui.selectable_value(&mut s.default_zoom, ZoomPref::FitPage, "Fit page");
-                                ui.selectable_value(&mut s.default_zoom, ZoomPref::Actual, "Actual size");
+                    egui::Grid::new("prefs")
+                        .num_columns(2)
+                        .spacing(vec2(16.0, 10.0))
+                        .show(ui, |ui| {
+                            ui.label("Theme");
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut s.theme, ThemePref::System, "System");
+                                ui.radio_value(&mut s.theme, ThemePref::Light, "Light");
+                                ui.radio_value(&mut s.theme, ThemePref::Dark, "Dark");
                             });
-                        ui.end_row();
-                        ui.label("Reading");
-                        ui.vertical(|ui| {
-                            ui.checkbox(&mut s.remember_page, "Reopen documents at the last page read");
-                            ui.checkbox(&mut s.restore_tabs, "Reopen my tabs when BDF starts");
-                            ui.checkbox(&mut s.cover_page, "Facing layouts: show the cover on its own");
-                            ui.checkbox(&mut s.dark_pages, "Dark pages (night reading)");
-                        });
-                        ui.end_row();
-                        ui.label("Highlight colour");
-                        ui.color_edit_button_srgb(&mut s.highlight_color);
-                        ui.end_row();
-                        ui.label("Pen");
-                        ui.horizontal(|ui| {
-                            ui.color_edit_button_srgb(&mut s.ink_color);
-                            ui.add(egui::Slider::new(&mut s.ink_width, 0.5..=12.0).suffix(" pt"));
-                        });
-                        ui.end_row();
-                        ui.label("Magnifier");
-                        ui.add(egui::Slider::new(&mut s.magnifier_zoom, 1.5..=8.0).suffix("×"));
-                        ui.end_row();
-                        ui.label("Image memory");
-                        ui.add(egui::Slider::new(&mut s.cache_mib, 64..=2048).suffix(" MB").logarithmic(true));
-                        ui.end_row();
-                        ui.label("Graphics");
-                        egui::ComboBox::from_id_salt("pref-gfx")
-                            .selected_text(match s.renderer {
-                                RendererPref::Auto => "Automatic",
-                                RendererPref::OpenGl => "OpenGL",
-                                RendererPref::Wgpu => "DirectX / Vulkan / Metal",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut s.renderer, RendererPref::Auto, "Automatic");
-                                ui.selectable_value(&mut s.renderer, RendererPref::OpenGl, "OpenGL");
-                                ui.selectable_value(&mut s.renderer, RendererPref::Wgpu, "DirectX / Vulkan / Metal");
+                            ui.end_row();
+                            ui.label("Page layout");
+                            egui::ComboBox::from_id_salt("pref-layout")
+                                .selected_text(s.page_mode.label())
+                                .show_ui(ui, |ui| {
+                                    for m in PageMode::ALL {
+                                        ui.selectable_value(&mut s.page_mode, m, m.label());
+                                    }
+                                });
+                            ui.end_row();
+                            ui.label("Opening zoom");
+                            egui::ComboBox::from_id_salt("pref-zoom")
+                                .selected_text(match s.default_zoom {
+                                    ZoomPref::FitWidth => "Fit width",
+                                    ZoomPref::FitPage => "Fit page",
+                                    ZoomPref::Actual => "Actual size",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut s.default_zoom,
+                                        ZoomPref::FitWidth,
+                                        "Fit width",
+                                    );
+                                    ui.selectable_value(
+                                        &mut s.default_zoom,
+                                        ZoomPref::FitPage,
+                                        "Fit page",
+                                    );
+                                    ui.selectable_value(
+                                        &mut s.default_zoom,
+                                        ZoomPref::Actual,
+                                        "Actual size",
+                                    );
+                                });
+                            ui.end_row();
+                            ui.label("Reading");
+                            ui.vertical(|ui| {
+                                ui.checkbox(
+                                    &mut s.remember_page,
+                                    "Reopen documents at the last page read",
+                                );
+                                ui.checkbox(&mut s.restore_tabs, "Reopen my tabs when BDF starts");
+                                ui.checkbox(
+                                    &mut s.cover_page,
+                                    "Facing layouts: show the cover on its own",
+                                );
+                                ui.checkbox(&mut s.dark_pages, "Dark pages (night reading)");
                             });
-                        ui.end_row();
-                    });
+                            ui.end_row();
+                            ui.label("Highlight colour");
+                            ui.color_edit_button_srgb(&mut s.highlight_color);
+                            ui.end_row();
+                            ui.label("Pen");
+                            ui.horizontal(|ui| {
+                                ui.color_edit_button_srgb(&mut s.ink_color);
+                                ui.add(
+                                    egui::Slider::new(&mut s.ink_width, 0.5..=12.0).suffix(" pt"),
+                                );
+                            });
+                            ui.end_row();
+                            ui.label("Magnifier");
+                            ui.add(egui::Slider::new(&mut s.magnifier_zoom, 1.5..=8.0).suffix("×"));
+                            ui.end_row();
+                            ui.label("Image memory");
+                            ui.add(
+                                egui::Slider::new(&mut s.cache_mib, 64..=2048)
+                                    .suffix(" MB")
+                                    .logarithmic(true),
+                            );
+                            ui.end_row();
+                            ui.label("Graphics");
+                            egui::ComboBox::from_id_salt("pref-gfx")
+                                .selected_text(match s.renderer {
+                                    RendererPref::Auto => "Automatic",
+                                    RendererPref::OpenGl => "OpenGL",
+                                    RendererPref::Wgpu => "DirectX / Vulkan / Metal",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut s.renderer,
+                                        RendererPref::Auto,
+                                        "Automatic",
+                                    );
+                                    ui.selectable_value(
+                                        &mut s.renderer,
+                                        RendererPref::OpenGl,
+                                        "OpenGL",
+                                    );
+                                    ui.selectable_value(
+                                        &mut s.renderer,
+                                        RendererPref::Wgpu,
+                                        "DirectX / Vulkan / Metal",
+                                    );
+                                });
+                            ui.end_row();
+                        });
                     ui.add_space(6.0);
                     ui.weak(format!(
                         "Settings are stored in {}{}",
                         self.data.path.display(),
-                        if self.data.portable { " (portable)" } else { "" }
+                        if self.data.portable {
+                            " (portable)"
+                        } else {
+                            ""
+                        }
                     ));
                     if s.renderer != before.renderer {
                         ui.weak("The graphics change applies the next time BDF starts.");
@@ -374,15 +509,21 @@ impl BdfApp {
                 modal.show(ctx, |ui| {
                     ui.set_width(520.0);
                     ui.heading(format!("{}  Keyboard shortcuts", icon::KEYBOARD));
-                    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                        egui::Grid::new("keys").num_columns(2).striped(true).spacing(vec2(20.0, 4.0)).show(ui, |ui| {
-                            for (k, v) in SHORTCUTS {
-                                ui.monospace(*k);
-                                ui.label(*v);
-                                ui.end_row();
-                            }
+                    egui::ScrollArea::vertical()
+                        .max_height(420.0)
+                        .show(ui, |ui| {
+                            egui::Grid::new("keys")
+                                .num_columns(2)
+                                .striped(true)
+                                .spacing(vec2(20.0, 4.0))
+                                .show(ui, |ui| {
+                                    for (k, v) in SHORTCUTS {
+                                        ui.monospace(*k);
+                                        ui.label(*v);
+                                        ui.end_row();
+                                    }
+                                });
                         });
-                    });
                     buttons(ui, |ui| {
                         if primary(ui, "Close") {
                             outcome = Outcome::Close;
@@ -431,23 +572,39 @@ impl BdfApp {
                     outcome = Outcome::Close;
                 }
             }
-            Dialog::Print { doc, ranges, copies, error } => {
-                let Some(d) = self.docs.get(doc) else { return Outcome::Close };
+            Dialog::Print {
+                doc,
+                ranges,
+                copies,
+                error,
+            } => {
+                let Some(d) = self.docs.get(doc) else {
+                    return Outcome::Close;
+                };
                 let (pages, dirty, path) = (d.page_count() as u32, d.dirty, d.path.clone());
                 let mut go = false;
                 modal.show(ctx, |ui| {
                     ui.set_width(400.0);
                     ui.heading(format!("{}  Print", icon::PRINT));
-                    egui::Grid::new("print").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
-                        ui.label("Pages");
-                        ui.add(TextEdit::singleline(ranges).hint_text(format!("all (1-{pages}), or e.g. 1-3, 5")));
-                        ui.end_row();
-                        ui.label("Copies");
-                        ui.add(egui::DragValue::new(copies).range(1..=99));
-                        ui.end_row();
-                    });
+                    egui::Grid::new("print")
+                        .num_columns(2)
+                        .spacing(vec2(12.0, 8.0))
+                        .show(ui, |ui| {
+                            ui.label("Pages");
+                            ui.add(
+                                TextEdit::singleline(ranges)
+                                    .hint_text(format!("all (1-{pages}), or e.g. 1-3, 5")),
+                            );
+                            ui.end_row();
+                            ui.label("Copies");
+                            ui.add(egui::DragValue::new(copies).range(1..=99));
+                            ui.end_row();
+                        });
                     if dirty {
-                        ui.colored_label(theme::palette(ui.visuals().dark_mode).danger, "Unsaved annotations are not printed. Save first to include them.");
+                        ui.colored_label(
+                            theme::palette(ui.visuals().dark_mode).danger,
+                            "Unsaved annotations are not printed. Save first to include them.",
+                        );
                     }
                     ui.weak("Prints on the default printer through CUPS.");
                     if let Some(e) = error {
@@ -506,8 +663,14 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+Left / Alt+Right", "Back / forward"),
     ("Ctrl + mouse wheel", "Zoom"),
     ("Ctrl++ / Ctrl+-", "Zoom in / out"),
-    ("Ctrl+0 / Ctrl+1 / Ctrl+2", "Fit page / actual size / fit width"),
-    ("Ctrl+R / Ctrl+Shift+R", "Rotate clockwise / counter-clockwise"),
+    (
+        "Ctrl+0 / Ctrl+1 / Ctrl+2",
+        "Fit page / actual size / fit width",
+    ),
+    (
+        "Ctrl+R / Ctrl+Shift+R",
+        "Rotate clockwise / counter-clockwise",
+    ),
     ("V / H / Z", "Select / hand / magnifier tool"),
     ("Middle mouse drag", "Pan with any tool"),
     ("Ctrl+C / Ctrl+A", "Copy / select all on page"),
