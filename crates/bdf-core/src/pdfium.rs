@@ -457,7 +457,7 @@ impl PdfiumEngine {
             lib.FPDFBitmap_Destroy(bmp);
         }
         // The bitmap has no alpha channel; its fourth byte is undefined.
-        for px in rgba.chunks_exact_mut(4) {
+        for px in rgba.as_chunks_mut::<4>().0 {
             px[3] = 255;
         }
         Ok(Image {

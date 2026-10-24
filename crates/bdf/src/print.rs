@@ -210,7 +210,7 @@ pub mod windows {
                 };
                 // GDI wants BGRA, top-down via a negative height.
                 let mut bgra = img.rgba;
-                for px in bgra.chunks_exact_mut(4) {
+                for px in bgra.as_chunks_mut::<4>().0 {
                     px.swap(0, 2);
                 }
                 let mut bmi: BITMAPINFO = std::mem::zeroed();

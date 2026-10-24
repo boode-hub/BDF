@@ -103,7 +103,9 @@ fn thumb(doc: DocId, page: u32) -> TileKey {
 
 fn dark_fraction(rgba: &[u8]) -> f32 {
     let dark = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| (p[0] as u32 + p[1] as u32 + p[2] as u32) < 300)
         .count();
     dark as f32 / (rgba.len() / 4) as f32
@@ -159,7 +161,7 @@ fn renders_tiles_thumbnails_regions_and_dark_mode() {
         dark_fraction(&t.rgba) > 0.0005,
         "thumbnail should show text"
     );
-    assert!(t.rgba.chunks_exact(4).all(|p| p[3] == 255));
+    assert!(t.rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
 
     // Page 1 has a black band along its bottom 100pt.
     let scale = quantize_scale(1.0);
@@ -377,7 +379,9 @@ fn annotations_round_trip_through_an_in_place_save() {
     let after = e.render(&thumb(doc, 0)).unwrap();
     let reddish = |img: &bdf_core::engine::Image| {
         img.rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] > 200 && p[1] < 120 && p[2] < 120)
             .count()
     };

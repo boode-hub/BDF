@@ -62,13 +62,19 @@ jobs:
           else
             target/release/bdf --bench --report bench.json
           fi
-          python3 scripts/check_bench.py bench.json
+          python3 scripts/check_bench.py bench.json || {
+            echo "--- warnings and errors from bench-data/bdf.log ---"
+            grep -E "WARN|ERROR" bench-data/bdf.log | tail -40 || true
+            exit 1
+          }
       - name: UI test (real clicks on the real app)
         if: runner.os == 'Linux'
         run: scripts/ui_smoke.sh target/release/bdf shots
       - name: Package portable zip
         run: scripts/package.sh ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
+        # Also on failure: the report, log and screenshots are what explain it.
+        if: always()
         with:
           name: BDF-${{ matrix.platform }}
           path: |
@@ -76,7 +82,7 @@ jobs:
             bench.json
             bench-data/bdf.log
             shots/*.png
-          if-no-files-found: error
+          if-no-files-found: warn
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

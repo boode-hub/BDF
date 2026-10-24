@@ -52,6 +52,11 @@ impl TileCache {
         self.in_flight.len()
     }
 
+    /// The images still awaited (for diagnostics).
+    pub fn pending_keys(&self) -> Vec<TileKey> {
+        self.in_flight.keys().copied().collect()
+    }
+
     pub fn begin_frame(&mut self) {
         self.lru.begin_frame();
         self.wanted.clear();

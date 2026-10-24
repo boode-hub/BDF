@@ -247,11 +247,15 @@ mod tests {
             assert_eq!(px(150, 150), [160, 0, 0, 255], "red centre");
             // Some iris shows between the blades, and the blades are black.
             let reds = img
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|p| p[0] > 120 && p[3] == 255)
                 .count();
             let blacks = img
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|p| p[0] == 0 && p[3] == 255)
                 .count();
             assert!(
@@ -259,7 +263,12 @@ mod tests {
                 "{eye:?}: {reds} red, {blacks} black"
             );
             // Anti-aliased: the rim's outer edge has partly covered pixels.
-            assert!(img.chunks_exact(4).any(|p| p[3] > 20 && p[3] < 235));
+            assert!(
+                img.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[3] > 20 && p[3] < 235)
+            );
         }
     }
 }

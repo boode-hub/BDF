@@ -8,6 +8,13 @@ use eframe::egui::{Context, ViewportCommand, vec2};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// How long the idle CPU is measured; long enough that the two frames the
+/// measurement itself causes do not dominate it.
+const IDLE_WINDOW: Duration = Duration::from_secs(10);
+/// How long to wait for outstanding images before reporting them and moving on.
+const IMAGE_WAIT: Duration = Duration::from_secs(15);
+
+#[derive(Debug)]
 enum Phase {
     WaitOpen,
     WaitFirstRender,
@@ -37,6 +44,8 @@ pub struct Bench {
     pages: usize,
     idle_frames: u32,
     deadline: Instant,
+    /// Since when the script has been waiting for outstanding images.
+    waiting_since: Option<Instant>,
     failures: Vec<String>,
 }
 
@@ -74,14 +83,47 @@ impl Bench {
             pages: 0,
             idle_frames: 0,
             deadline: Instant::now() + Duration::from_secs(180),
+            waiting_since: None,
             failures: Vec::new(),
         }
+    }
+
+    /// True once no images are outstanding. Images that never arrive are
+    /// reported as a failure after [`IMAGE_WAIT`] instead of stalling the run.
+    fn images_settled(&mut self, app: &BdfApp) -> bool {
+        let pending = app.tiles.pending_keys();
+        if pending.is_empty() {
+            self.waiting_since = None;
+            return true;
+        }
+        let since = *self.waiting_since.get_or_insert_with(Instant::now);
+        if since.elapsed() < IMAGE_WAIT {
+            return false;
+        }
+        self.failures.push(format!(
+            "{} image(s) never arrived during {:?}, e.g. {:?}",
+            pending.len(),
+            self.phase,
+            &pending[..pending.len().min(3)]
+        ));
+        self.waiting_since = None;
+        true
     }
 
     /// Advances the script; returns false once finished.
     pub fn tick(&mut self, app: &mut BdfApp, ctx: &Context) -> bool {
         if Instant::now() > self.deadline && !matches!(self.phase, Phase::Done) {
-            self.failures.push("timed out".into());
+            let search = app
+                .active_tab()
+                .and_then(|t| app.docs.get(&t.doc))
+                .and_then(|d| d.search.as_ref())
+                .map(|s| (s.done, s.hits.len()));
+            self.failures.push(format!(
+                "timed out in {:?}: {} image(s) pending, search (done, hits) {:?}",
+                self.phase,
+                app.tiles.pending(),
+                search
+            ));
             self.phase = Phase::Done;
         }
         if let Some(e) = &app.engine_error {
@@ -171,7 +213,7 @@ impl Bench {
                     .and_then(|d| d.search.as_ref())
                     .map(|s| (s.done, s.hits.len()));
                 if let Some((true, hits)) = done {
-                    if app.tiles.pending() > 0 {
+                    if !self.images_settled(app) {
                         ctx.request_repaint();
                         return true;
                     }
@@ -187,11 +229,11 @@ impl Bench {
             }
             Phase::Settle(n) => {
                 // Let rendering finish before measuring idle CPU.
-                if app.tiles.pending() == 0 && n > 30 {
+                if n > 30 && self.images_settled(app) {
                     let cpu = crate::sysinfo::sample().cpu_secs.unwrap_or(0.0);
                     self.phase = Phase::Idle(Instant::now(), cpu);
                     // Come back after the idle window without forcing frames in between.
-                    ctx.request_repaint_after(Duration::from_secs(3));
+                    ctx.request_repaint_after(IDLE_WINDOW);
                     return true;
                 }
                 self.phase = Phase::Settle(n + 1);
@@ -201,8 +243,8 @@ impl Bench {
                 if self.idle_frames.is_multiple_of(50) {
                     log::warn!("still repainting while idle: {:?}", ctx.repaint_causes());
                 }
-                if t0.elapsed() < Duration::from_secs(3) {
-                    ctx.request_repaint_after(Duration::from_secs(3) - t0.elapsed());
+                if t0.elapsed() < IDLE_WINDOW {
+                    ctx.request_repaint_after(IDLE_WINDOW - t0.elapsed());
                     return true;
                 }
                 let cpu = crate::sysinfo::sample().cpu_secs.unwrap_or(cpu0);

@@ -102,7 +102,7 @@ impl fmt::Debug for Image {
 
 impl Image {
     pub fn invert(&mut self) {
-        for px in self.rgba.chunks_exact_mut(4) {
+        for px in self.rgba.as_chunks_mut::<4>().0 {
             px[0] = 255 - px[0];
             px[1] = 255 - px[1];
             px[2] = 255 - px[2];

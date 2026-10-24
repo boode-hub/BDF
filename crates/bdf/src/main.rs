@@ -21,7 +21,7 @@ use bdf_core::settings::{DataDir, RendererPref};
 use eframe::egui;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const USAGE: &str = "\
 BDF — a fast, portable PDF reader
@@ -182,10 +182,13 @@ fn main() -> ExitCode {
     let mut files = args.files.clone();
     let bench = match &args.bench {
         Some(file) => {
+            let mut setup = Duration::ZERO;
             let file = file.clone().unwrap_or_else(|| {
                 let p = std::env::temp_dir().join("bdf-bench-2000.pdf");
                 if !p.exists() {
+                    let t = Instant::now();
                     let _ = std::fs::write(&p, bdf_core::testpdf::long_document(2000));
+                    setup = t.elapsed();
                 }
                 p
             });
@@ -194,7 +197,8 @@ fn main() -> ExitCode {
                 .report
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("bdf-bench.json"));
-            Some(bench::Bench::new(file, report, launched))
+            // Writing the test file is not part of starting up.
+            Some(bench::Bench::new(file, report, launched + setup))
         }
         None => None,
     };
