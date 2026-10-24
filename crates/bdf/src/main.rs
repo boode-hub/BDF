@@ -204,10 +204,9 @@ fn main() -> ExitCode {
     };
 
     let pref = args.renderer.unwrap_or(settings.renderer);
-    let renderer = match pref {
-        RendererPref::Wgpu => eframe::Renderer::Wgpu,
-        RendererPref::OpenGl | RendererPref::Auto => eframe::Renderer::Glow,
-    };
+    let renderer = choose_renderer(pref, settings.opengl_failed);
+    let auto_tried_opengl = pref == RendererPref::Auto && renderer == eframe::Renderer::Glow;
+    let data_dir = data.clone();
     let renderer_name = match renderer {
         eframe::Renderer::Wgpu => "wgpu",
         _ => "OpenGL",
@@ -253,10 +252,16 @@ fn main() -> ExitCode {
             // OpenGL is missing on some virtual machines and remote desktops:
             // start again with DirectX / Vulkan / Metal (a process can only
             // create one window event loop, so this needs a fresh process).
-            if pref == RendererPref::Auto
+            if auto_tried_opengl
                 && std::env::var_os("BDF_NO_FALLBACK").is_none()
                 && let Ok(exe) = std::env::current_exe()
             {
+                // Remember, so later starts skip the failed attempt.
+                let mut s = data_dir.load();
+                s.opengl_failed = true;
+                if let Err(e) = data_dir.save(&s) {
+                    log::warn!("could not remember the graphics fallback: {e}");
+                }
                 let mut cmd = std::process::Command::new(exe);
                 cmd.args(std::env::args_os().skip(1))
                     .arg("--renderer")
@@ -274,6 +279,16 @@ fn main() -> ExitCode {
             eprintln!("bdf: could not start the window: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// OpenGL starts fastest and is the default; "Automatic" skips it once it has
+/// failed on this computer.
+fn choose_renderer(pref: RendererPref, opengl_failed: bool) -> eframe::Renderer {
+    match pref {
+        RendererPref::Wgpu => eframe::Renderer::Wgpu,
+        RendererPref::Auto if opengl_failed => eframe::Renderer::Wgpu,
+        RendererPref::OpenGl | RendererPref::Auto => eframe::Renderer::Glow,
     }
 }
 
@@ -305,4 +320,19 @@ fn list_annotations(path: &std::path::Path) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_skips_opengl_once_it_failed() {
+        use eframe::Renderer::{Glow, Wgpu};
+        assert_eq!(choose_renderer(RendererPref::Auto, false), Glow);
+        assert_eq!(choose_renderer(RendererPref::Auto, true), Wgpu);
+        // An explicit choice is always honoured.
+        assert_eq!(choose_renderer(RendererPref::OpenGl, true), Glow);
+        assert_eq!(choose_renderer(RendererPref::Wgpu, false), Wgpu);
+    }
 }

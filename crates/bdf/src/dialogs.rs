@@ -489,6 +489,8 @@ impl BdfApp {
                     ));
                     if s.renderer != before.renderer {
                         ui.weak("The graphics change applies the next time BDF starts.");
+                        // A new choice gets a fresh try ("Automatic" tries OpenGL again).
+                        s.opengl_failed = false;
                     }
                     let changed = *s != before;
                     let theme_changed = s.theme != before.theme;

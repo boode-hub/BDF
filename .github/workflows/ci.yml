@@ -54,6 +54,10 @@ jobs:
       - name: Benchmark (real app, 2000 pages)
         run: |
           cp .pdfium/*pdfium* target/release/
+          # The first run of a new executable is slow on Windows (antivirus
+          # scan); that is not BDF's start-up, so run it once beforehand.
+          target/release/bdf --generate 3 warmup.pdf
+          target/release/bdf --list-annotations warmup.pdf
           mkdir -p bench-data
           export BDF_DATA_DIR="$PWD/bench-data"
           mkdir -p shots

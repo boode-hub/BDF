@@ -68,6 +68,9 @@ pub struct RecentFile {
 pub struct Settings {
     pub theme: ThemePref,
     pub renderer: RendererPref,
+    /// OpenGL failed to start on this computer, so "Automatic" goes straight
+    /// to DirectX / Vulkan / Metal instead of failing and restarting each time.
+    pub opengl_failed: bool,
     pub page_mode: PageMode,
     pub cover_page: bool,
     pub default_zoom: ZoomPref,
@@ -95,6 +98,7 @@ impl Default for Settings {
         Self {
             theme: ThemePref::Dark,
             renderer: RendererPref::Auto,
+            opengl_failed: false,
             page_mode: PageMode::Continuous,
             cover_page: false,
             default_zoom: ZoomPref::FitWidth,
