@@ -15,6 +15,7 @@ cp "$root"/.pdfium/*pdfium* "$out/" 2>/dev/null || true
 mkdir -p "$out/licenses"
 cp "$root/.pdfium/PDFium-LICENSE.txt" "$out/licenses/"
 cp "$root/crates/bdf/assets/Phosphor-LICENSE-MIT.txt" "$out/licenses/"
+cp "$root/crates/bdf/assets/Sharingan-Monitor-eyes.txt" "$out/licenses/"
 cp "$root/packaging/README.txt" "$out/"
 mkdir -p "$out/BDF-data"   # presence = portable mode; settings stay in this folder
 cd "$root/dist"

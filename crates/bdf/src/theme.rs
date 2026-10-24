@@ -220,10 +220,6 @@ pub fn window_icon(eye: EyeStyle) -> egui::IconData {
     }
 }
 
-fn image(n: usize, rgba: Vec<u8>) -> egui::ColorImage {
-    egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba)
-}
-
 fn art_id(name: &str) -> egui::Id {
     egui::Id::unique(("bdf-art", name))
 }
@@ -235,42 +231,56 @@ fn to_eye(e: EyeStyle) -> crate::icon_pixels::Eye {
     }
 }
 
-/// Uploads the chosen eye as the logo; call again when the choice changes.
+/// Sets the eye used for the logo; call again when the choice changes.
 pub fn install_art(ctx: &egui::Context, eye: EyeStyle) {
-    let logo = ctx.load_texture(
-        "bdf-logo",
-        image(256, crate::icon_pixels::eye_rgba(to_eye(eye), 256)),
+    ctx.data_mut(|d| d.insert_temp(art_id("eye"), eye));
+}
+
+/// The logo rendered for exactly `px` device pixels, made on first use, so it
+/// is never scaled on the GPU (scaling is what makes small icons jagged).
+fn logo_texture(ctx: &egui::Context, px: u32) -> egui::TextureHandle {
+    let eye: EyeStyle = ctx.data(|d| d.get_temp(art_id("eye"))).unwrap_or_default();
+    let id = egui::Id::unique(("bdf-logo", eye, px));
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return t;
+    }
+    let n = px as usize;
+    let rgba = crate::icon_pixels::eye_rgba(to_eye(eye), n);
+    let t = ctx.load_texture(
+        format!("bdf-logo-{eye:?}-{px}"),
+        egui::ColorImage::from_rgba_unmultiplied([n, n], &rgba),
         egui::TextureOptions::LINEAR,
     );
-    ctx.data_mut(|d| d.insert_temp(art_id("logo"), logo));
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    t
+}
+
+/// Paints the logo in a `size`-point square at `rect`'s corner, snapped to
+/// device pixels so each texel lands on exactly one pixel.
+fn paint_logo(ui: &egui::Ui, rect: egui::Rect, size: f32, angle: f32) {
+    let ppp = ui.ctx().pixels_per_point();
+    let px = (size * ppp).round().clamp(1.0, 1024.0);
+    let tex = logo_texture(ui.ctx(), px as u32);
+    let centre = rect.center();
+    let min = ((centre.to_vec2() * ppp - egui::Vec2::splat(px * 0.5)).round() / ppp).to_pos2();
+    let r = egui::Rect::from_min_size(min, egui::Vec2::splat(px / ppp));
+    egui::Image::new(&tex)
+        .rotate(angle, egui::vec2(0.5, 0.5))
+        .paint_at(ui, r);
 }
 
 /// The Mangekyou logo at `size` points.
 pub fn logo(ui: &mut egui::Ui, size: f32) -> egui::Response {
-    match ui
-        .ctx()
-        .data(|d| d.get_temp::<egui::TextureHandle>(art_id("logo")))
-    {
-        Some(t) => ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(size, size))),
-        None => ui.label(egui::RichText::new(icon::PDF).size(size)),
-    }
+    let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
+    paint_logo(ui, rect, size, 0.0);
+    resp
 }
 
 /// The Mangekyou spinning, shown while work is in progress.
 pub fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
-    match ui
-        .ctx()
-        .data(|d| d.get_temp::<egui::TextureHandle>(art_id("logo")))
-    {
-        Some(t) => {
-            let angle = -(ui.input(|i| i.time) as f32) * 4.0;
-            ui.ctx().request_repaint();
-            ui.add(
-                egui::Image::new(&t)
-                    .fit_to_exact_size(egui::vec2(size, size))
-                    .rotate(angle, egui::vec2(0.5, 0.5)),
-            )
-        }
-        None => ui.add(egui::Spinner::new().size(size)),
-    }
+    let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
+    let angle = -(ui.input(|i| i.time) as f32) * 4.0;
+    ui.ctx().request_repaint();
+    paint_logo(ui, rect, size, angle);
+    resp
 }

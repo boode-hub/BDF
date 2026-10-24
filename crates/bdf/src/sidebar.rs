@@ -3,7 +3,8 @@
 use crate::app::{BdfApp, SidebarTab};
 use crate::theme::{self, icon};
 use crate::view::Jump;
-use bdf_core::engine::{DocId, OutlineItem, TileKey, TileKind, thumb_px};
+use bdf_core::engine::{DocId, OutlineItem, TileKey, TileKind, tile_grid};
+use bdf_core::geom::{page_px, quantize_scale};
 use eframe::egui::{
     self, Color32, Context, CornerRadius, Id, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
@@ -100,17 +101,23 @@ impl BdfApp {
         let labels: Vec<Option<String>> = d.info.page_labels.clone();
         let dark_pages = self.settings.dark_pages;
         let tiles = &mut self.tiles;
+        let ppp = ui.ctx().pixels_per_point();
         area.show_rows(ui, row_h, n, |ui, range| {
             for p in range {
                 let (page, size, generation) = ids[p];
                 let (rect, resp) =
                     ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
+                // Rendered for the exact device pixels it covers, and placed on
+                // the pixel grid, so thumbnails are sharp at any display scaling.
                 let size_rot = rotation.apply_size(size);
-                let (tw, th) = thumb_px(size_rot);
-                let scale = (thumb_w / tw as f32).min((row_h - 30.0) / th as f32);
-                let img = egui::Rect::from_center_size(
-                    pos2(rect.center().x, rect.min.y + 6.0 + (row_h - 30.0) * 0.5),
-                    vec2(tw as f32 * scale, th as f32 * scale),
+                let fit = (thumb_w / size_rot.0).min((row_h - 30.0) / size_rot.1);
+                let q = quantize_scale(fit * ppp);
+                let (pw, ph) = page_px(size_rot, q);
+                let centre = pos2(rect.center().x, rect.min.y + 6.0 + (row_h - 30.0) * 0.5);
+                let min = (centre.to_vec2() * ppp - vec2(pw as f32, ph as f32) * 0.5).round() / ppp;
+                let img = egui::Rect::from_min_size(
+                    min.to_pos2(),
+                    vec2(pw as f32 / ppp, ph as f32 / ppp),
                 );
                 let painter = ui.painter();
                 if page == current {
@@ -140,7 +147,7 @@ impl BdfApp {
                         Color32::WHITE
                     },
                 );
-                let key = TileKey {
+                let thumb = TileKey {
                     doc,
                     page: page as u32,
                     rotation,
@@ -148,10 +155,23 @@ impl BdfApp {
                     generation,
                     kind: TileKind::Thumb,
                 };
-                if let Some(t) = tiles.want(
-                    key,
-                    3000 + (page as i64 - current as i64).unsigned_abs() as u32,
-                ) {
+                let priority = 3000 + (page as i64 - current as i64).unsigned_abs() as u32;
+                // One tile holds the whole page at thumbnail size; the shared
+                // low-resolution thumbnail stands in while it renders.
+                let image = if tile_grid(size_rot, q) == (1, 1) {
+                    let sharp = TileKey {
+                        kind: TileKind::Tile {
+                            scale: q,
+                            tx: 0,
+                            ty: 0,
+                        },
+                        ..thumb
+                    };
+                    tiles.want(sharp, priority).or_else(|| tiles.cached(&thumb))
+                } else {
+                    tiles.want(thumb, priority)
+                };
+                if let Some(t) = image {
                     painter.image(
                         t.id(),
                         img,

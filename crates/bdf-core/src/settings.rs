@@ -27,7 +27,7 @@ pub enum RendererPref {
 }
 
 /// Which Mangekyou Sharingan is BDF's logo, spinner and window icon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum EyeStyle {
     #[default]
     Kakashi,
