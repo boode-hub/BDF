@@ -15,7 +15,7 @@
 //! A panic inside a job is caught and reported; the thread keeps serving.
 
 use crate::engine::{
-    DocId, DocInfo, Engine, Image, NewAnnot, OpenError, PageData, RegionReq, TileKey,
+    AnnotInfo, DocId, DocInfo, Engine, Image, NewAnnot, OpenError, PageData, RegionReq, TileKey,
 };
 use crate::text::{Match, SearchOptions};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -38,6 +38,8 @@ pub enum Request {
     PageData { doc: DocId, page: u32 },
     Search { doc: DocId, ticket: u64, query: String, opts: SearchOptions, start_page: u32 },
     CancelSearch { doc: DocId },
+    /// List every annotation in the document, page by page.
+    ScanAnnots { doc: DocId, ticket: u64 },
     AddAnnot { doc: DocId, page: u32, annot: NewAnnot, ticket: u64 },
     RemoveAnnot { doc: DocId, page: u32, index: usize, name: Option<String>, ticket: u64 },
     SetAnnotText { doc: DocId, page: u32, index: usize, name: Option<String>, text: String, ticket: u64 },
@@ -64,6 +66,7 @@ pub enum Response {
     PageData { doc: DocId, page: u32, data: Result<Box<PageData>, String> },
     SearchHits { doc: DocId, ticket: u64, hits: Vec<SearchHit> },
     SearchProgress { doc: DocId, ticket: u64, searched: u32, total: u32, done: bool },
+    Annots { doc: DocId, ticket: u64, page: u32, annots: Vec<AnnotInfo>, done: bool },
     /// An annotation edit finished; `page` must be re-rendered.
     AnnotEdited { doc: DocId, page: u32, ticket: u64, result: Result<String, String> },
     Saved { doc: DocId, ticket: u64, target: PathBuf, result: Result<(), String> },
@@ -218,6 +221,7 @@ struct Worker {
     queued: HashMap<TileKey, (u32, u64)>,
     seq: u64,
     searches: HashMap<DocId, SearchJob>,
+    scans: HashMap<DocId, (u64, u32, u32)>,
     open_docs: HashMap<DocId, u32>,
     shutdown: bool,
     dirty: bool,
@@ -244,6 +248,7 @@ impl Worker {
             queued: HashMap::new(),
             seq: 0,
             searches: HashMap::new(),
+            scans: HashMap::new(),
             open_docs: HashMap::new(),
             shutdown: false,
             dirty: false,
@@ -256,6 +261,7 @@ impl Worker {
             || !self.page_data.is_empty()
             || !self.queue.is_empty()
             || !self.searches.is_empty()
+            || !self.scans.is_empty()
     }
 
     fn run(mut self) {
@@ -365,6 +371,10 @@ impl Worker {
             Request::CancelSearch { doc } => {
                 self.searches.remove(&doc);
             }
+            Request::ScanAnnots { doc, ticket } => {
+                let total = self.open_docs.get(&doc).copied().unwrap_or(0);
+                self.scans.insert(doc, (ticket, 0, total));
+            }
             Request::AddAnnot { doc, page, annot, ticket } => {
                 self.control.push_back(Control::AddAnnot { doc, page, annot, ticket })
             }
@@ -394,6 +404,7 @@ impl Worker {
 
     fn drop_doc_work(&mut self, doc: DocId) {
         self.searches.remove(&doc);
+        self.scans.remove(&doc);
         self.page_data.retain(|(d, _)| *d != doc);
         if self.region.is_some_and(|r| r.doc == doc) {
             self.region = None;
@@ -458,7 +469,32 @@ impl Worker {
             }
             return;
         }
-        self.search_step();
+        if !self.searches.is_empty() {
+            self.search_step();
+        } else {
+            self.scan_step();
+        }
+    }
+
+    fn scan_step(&mut self) {
+        let Some((&doc, &(ticket, page, total))) = self.scans.iter().next() else {
+            return;
+        };
+        if page >= total {
+            self.scans.remove(&doc);
+            self.send(Response::Annots { doc, ticket, page, annots: Vec::new(), done: true });
+            return;
+        }
+        let annots = self.guarded(|e| e.annotations(doc, page)).and_then(|r| r).unwrap_or_default();
+        let done = page + 1 >= total;
+        if done {
+            self.scans.remove(&doc);
+        } else {
+            self.scans.insert(doc, (ticket, page + 1, total));
+        }
+        if !annots.is_empty() || done {
+            self.send(Response::Annots { doc, ticket, page, annots, done });
+        }
     }
 
     fn run_control(&mut self, c: Control) {
@@ -611,6 +647,21 @@ mod tests {
         fn page_data(&mut self, _: DocId, page: u32) -> EResult<PageData> {
             self.log.lock().unwrap().push(format!("data {page}"));
             Ok(PageData::default())
+        }
+        fn annotations(&mut self, _: DocId, page: u32) -> EResult<Vec<AnnotInfo>> {
+            Ok(if page == 2 {
+                vec![AnnotInfo {
+                    index: 0,
+                    name: None,
+                    kind: crate::engine::AnnotKind::Note,
+                    rect: [0.0; 4],
+                    contents: "hi".into(),
+                    author: String::new(),
+                    color: None,
+                }]
+            } else {
+                vec![]
+            })
         }
         fn page_text(&mut self, _: DocId, page: u32) -> EResult<PageText> {
             let s = if page % 3 == 0 { "a needle here" } else { "hay" };
@@ -837,6 +888,29 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
         assert_eq!(log.lock().unwrap().iter().filter(|l| *l == "region").count(), 1);
+    }
+
+    #[test]
+    fn annotation_scan_streams_pages_and_finishes() {
+        let (w, _log) = start(5);
+        let doc = open(&w);
+        w.send(Request::ScanAnnots { doc, ticket: 3 });
+        let mut pages = Vec::new();
+        loop {
+            match recv(&w) {
+                Response::Annots { ticket, page, annots, done, .. } => {
+                    assert_eq!(ticket, 3);
+                    if !annots.is_empty() {
+                        pages.push(page);
+                    }
+                    if done {
+                        break;
+                    }
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(pages, vec![2]);
     }
 
     #[test]

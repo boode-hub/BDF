@@ -294,6 +294,8 @@ pub trait Engine {
     fn page_size(&self, id: DocId, page: u32) -> Option<(f32, f32)>;
     fn page_data(&mut self, id: DocId, page: u32) -> EResult<PageData>;
     fn page_text(&mut self, id: DocId, page: u32) -> EResult<PageText>;
+    /// Annotations only (cheaper than [`Engine::page_data`]).
+    fn annotations(&mut self, id: DocId, page: u32) -> EResult<Vec<AnnotInfo>>;
     /// Adds an annotation and returns its `/NM`.
     fn add_annot(&mut self, id: DocId, page: u32, annot: &NewAnnot) -> EResult<String>;
     fn remove_annot(&mut self, id: DocId, page: u32, index: usize, name: Option<&str>) -> EResult<()>;

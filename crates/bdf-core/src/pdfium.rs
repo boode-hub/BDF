@@ -564,6 +564,11 @@ impl Engine for PdfiumEngine {
         self.page_text_of(id, page)
     }
 
+    fn annotations(&mut self, id: DocId, index: u32) -> EResult<Vec<AnnotInfo>> {
+        let page = self.page(id, index)?;
+        Ok(read_annots(&*self.lib, page))
+    }
+
     fn add_annot(&mut self, id: DocId, index: u32, annot: &NewAnnot) -> EResult<String> {
         let page = self.page(id, index)?;
         let lib = &*self.lib;

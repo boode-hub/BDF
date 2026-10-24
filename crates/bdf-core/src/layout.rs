@@ -251,6 +251,24 @@ impl Layout {
         (viewport_w / self.width).max(0.01)
     }
 
+    /// Zoom that makes the row holding `page` exactly as wide as the
+    /// viewport. Fitting the current row rather than the widest page keeps
+    /// documents that mix portrait and landscape pages readable.
+    pub fn fit_row_width_zoom(&self, page: usize, viewport_w: f32) -> f32 {
+        let Some(&ri) = self.row_of.get(page) else {
+            return self.fit_width_zoom(viewport_w);
+        };
+        let r = &self.rows[ri];
+        let mut w: f32 = self.pages[r.first..r.first + r.count].iter().map(|p| p.width()).sum::<f32>()
+            + self.gap * (r.count.saturating_sub(1)) as f32;
+        // A lone cover page in a facing layout counts as a full spread.
+        if r.count == 1 && self.rows.iter().any(|x| x.count == 2) {
+            w = w * 2.0 + self.gap;
+        }
+        let w = w + 2.0 * self.gap;
+        if w <= 0.0 { 1.0 } else { (viewport_w / w).max(0.01) }
+    }
+
     /// Zoom that makes the row containing `page` fit the viewport entirely.
     pub fn fit_page_zoom(&self, page: usize, viewport_w: f32, viewport_h: f32) -> f32 {
         let Some(&ri) = self.row_of.get(page) else {
@@ -258,7 +276,7 @@ impl Layout {
         };
         let r = &self.rows[ri];
         let h = (r.y1 - r.y0) + 2.0 * self.gap;
-        let zw = self.fit_width_zoom(viewport_w);
+        let zw = self.fit_row_width_zoom(page, viewport_w);
         let zh = if h > 0.0 { viewport_h / h } else { zw };
         zw.min(zh).max(0.01)
     }
@@ -373,6 +391,17 @@ mod tests {
         assert!((l.fit_width_zoom(636.0) - 1.0).abs() < 1e-6);
         let z = l.fit_page_zoom(0, 2000.0, 816.0);
         assert!((z - 816.0 / (792.0 + 24.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn fit_width_uses_the_current_page() {
+        let l = Layout::new(&[(612.0, 792.0), (792.0, 612.0)], &LayoutParams::default());
+        assert!((l.fit_row_width_zoom(0, 636.0) - 1.0).abs() < 1e-6);
+        assert!((l.fit_row_width_zoom(1, 816.0) - 1.0).abs() < 1e-6);
+        let p = LayoutParams { mode: PageMode::ContinuousFacing, ..Default::default() };
+        let l = Layout::new(&[(612.0, 792.0); 3], &p);
+        // The cover fits as if it were a spread, like the pair after it.
+        assert!((l.fit_row_width_zoom(0, 1260.0) - l.fit_row_width_zoom(1, 1260.0)).abs() < 1e-6);
     }
 
     #[test]
