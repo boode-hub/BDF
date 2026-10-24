@@ -1,5 +1,6 @@
 //! Look and feel: colours, spacing, fonts and icons.
 
+use bdf_core::settings::EyeStyle;
 use eframe::egui::{
     self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Margin, Stroke, Visuals,
 };
@@ -210,10 +211,10 @@ fn visuals(dark: bool) -> Visuals {
 }
 
 /// The window icon.
-pub fn window_icon() -> egui::IconData {
+pub fn window_icon(eye: EyeStyle) -> egui::IconData {
     let n = 64;
     egui::IconData {
-        rgba: crate::icon_pixels::icon_rgba(n),
+        rgba: crate::icon_pixels::eye_rgba(to_eye(eye), n),
         width: n as u32,
         height: n as u32,
     }
@@ -227,23 +228,21 @@ fn art_id(name: &str) -> egui::Id {
     egui::Id::unique(("bdf-art", name))
 }
 
-/// Uploads the Mangekyou logo and the tomoe spinner once.
-pub fn install_art(ctx: &egui::Context) {
-    let opts = egui::TextureOptions::LINEAR;
+fn to_eye(e: EyeStyle) -> crate::icon_pixels::Eye {
+    match e {
+        EyeStyle::Kakashi => crate::icon_pixels::Eye::Kakashi,
+        EyeStyle::Itachi => crate::icon_pixels::Eye::Itachi,
+    }
+}
+
+/// Uploads the chosen eye as the logo; call again when the choice changes.
+pub fn install_art(ctx: &egui::Context, eye: EyeStyle) {
     let logo = ctx.load_texture(
         "bdf-logo",
-        image(256, crate::icon_pixels::icon_rgba(256)),
-        opts,
+        image(256, crate::icon_pixels::eye_rgba(to_eye(eye), 256)),
+        egui::TextureOptions::LINEAR,
     );
-    let tomoe = ctx.load_texture(
-        "bdf-tomoe",
-        image(96, crate::icon_pixels::tomoe_rgba(96)),
-        opts,
-    );
-    ctx.data_mut(|d| {
-        d.insert_temp(art_id("logo"), logo);
-        d.insert_temp(art_id("tomoe"), tomoe);
-    });
+    ctx.data_mut(|d| d.insert_temp(art_id("logo"), logo));
 }
 
 /// The Mangekyou logo at `size` points.
@@ -257,11 +256,11 @@ pub fn logo(ui: &mut egui::Ui, size: f32) -> egui::Response {
     }
 }
 
-/// A spinning three-tomoe Sharingan, shown while work is in progress.
+/// The Mangekyou spinning, shown while work is in progress.
 pub fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
     match ui
         .ctx()
-        .data(|d| d.get_temp::<egui::TextureHandle>(art_id("tomoe")))
+        .data(|d| d.get_temp::<egui::TextureHandle>(art_id("logo")))
     {
         Some(t) => {
             let angle = -(ui.input(|i| i.time) as f32) * 4.0;

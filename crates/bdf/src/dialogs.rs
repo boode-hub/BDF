@@ -4,7 +4,7 @@ use crate::app::{BdfApp, Dialog, NoteTarget};
 use crate::theme::{self, icon};
 use bdf_core::engine::{AnnotKind, NewAnnot};
 use bdf_core::layout::PageMode;
-use bdf_core::settings::{RendererPref, ThemePref, ZoomPref};
+use bdf_core::settings::{EyeStyle, RendererPref, ThemePref, ZoomPref};
 use eframe::egui::{
     self, Align, Button, Context, Id, Key, Layout, Modal, RichText, TextEdit, Ui, vec2,
 };
@@ -435,6 +435,12 @@ impl BdfApp {
                                 );
                             });
                             ui.end_row();
+                            ui.label("Sharingan");
+                            ui.horizontal(|ui| {
+                                ui.radio_value(&mut s.eye, EyeStyle::Kakashi, "Kakashi");
+                                ui.radio_value(&mut s.eye, EyeStyle::Itachi, "Itachi");
+                            });
+                            ui.end_row();
                             ui.label("Magnifier");
                             ui.add(egui::Slider::new(&mut s.magnifier_zoom, 1.5..=8.0).suffix("×"));
                             ui.end_row();
@@ -486,11 +492,18 @@ impl BdfApp {
                     }
                     let changed = *s != before;
                     let theme_changed = s.theme != before.theme;
+                    let eye = (s.eye != before.eye).then_some(s.eye);
                     let cache = s.cache_mib;
                     if changed {
                         self.settings_changed = true;
                         if theme_changed {
                             self.apply_theme(ctx);
+                        }
+                        if let Some(eye) = eye {
+                            theme::install_art(ctx, eye);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(
+                                std::sync::Arc::new(theme::window_icon(eye)),
+                            )));
                         }
                         self.tiles.set_budget(cache as usize * 1024 * 1024);
                     }

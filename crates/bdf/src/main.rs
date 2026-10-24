@@ -213,7 +213,7 @@ fn main() -> ExitCode {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("BDF")
         .with_app_id("bdf")
-        .with_icon(theme::window_icon())
+        .with_icon(theme::window_icon(settings.eye))
         .with_min_inner_size([640.0, 420.0])
         .with_drag_and_drop(true);
     match settings.window {

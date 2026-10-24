@@ -1,5 +1,6 @@
 //! Embeds the icon and version information in the Windows executable.
 
+// Only the default (Kakashi) icon is used here.
 #[allow(dead_code)]
 #[path = "src/icon_pixels.rs"]
 mod icon_pixels;

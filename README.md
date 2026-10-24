@@ -1,8 +1,10 @@
 # BDF
 
 A fast, portable PDF reader for Windows, macOS and Linux, written in Rust,
-dressed in Sharingan crimson and black (a Mangekyou eye is the logo, and a
-spinning three-tomoe eye shows while pages load).
+dressed in Sharingan crimson and black. The logo is Kakashi's Mangekyou
+Sharingan (or Itachi's, in Preferences), drawn from the traced Classic eyes of
+[Sharingan-Monitor](https://github.com/BOoDe007/Sharingan-Monitor); it spins
+while pages load.
 
 * **Portable.** Unzip and run. No installer, no admin rights, no registry.
   Settings, bookmarks and the log live in `BDF-data/` next to the program.

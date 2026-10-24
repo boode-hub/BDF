@@ -26,6 +26,14 @@ pub enum RendererPref {
     Wgpu,
 }
 
+/// Which Mangekyou Sharingan is BDF's logo, spinner and window icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EyeStyle {
+    #[default]
+    Kakashi,
+    Itachi,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ZoomPref {
     #[default]
@@ -74,6 +82,7 @@ pub struct Settings {
     pub ink_color: [u8; 3],
     pub ink_width: f32,
     pub magnifier_zoom: f32,
+    pub eye: EyeStyle,
     pub recent: Vec<RecentFile>,
     pub open_tabs: Vec<PathBuf>,
     pub docs: HashMap<String, DocMemory>,
@@ -99,6 +108,7 @@ impl Default for Settings {
             ink_color: [220, 38, 38],
             ink_width: 2.0,
             magnifier_zoom: 2.5,
+            eye: EyeStyle::Kakashi,
             recent: Vec::new(),
             open_tabs: Vec::new(),
             docs: HashMap::new(),

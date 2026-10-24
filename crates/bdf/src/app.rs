@@ -211,7 +211,7 @@ impl BdfApp {
         let ctx = cc.egui_ctx.clone();
         theme::install_fonts(&ctx);
         theme::apply_both(&ctx);
-        theme::install_art(&ctx);
+        theme::install_art(&ctx, settings.eye);
         ctx.set_theme(match settings.theme {
             ThemePref::System => egui::ThemePreference::System,
             ThemePref::Light => egui::ThemePreference::Light,
