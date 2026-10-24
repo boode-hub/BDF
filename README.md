@@ -78,12 +78,16 @@ target/release/bdf some.pdf
 BDF_PDFIUM=$PWD/.pdfium cargo test --workspace     # unit + real-PDFium tests
 target/release/bdf --bench --report bench.json      # scripted benchmark of the real app
 python3 scripts/check_bench.py bench.json           # fails if over budget
+scripts/ui_smoke.sh target/release/bdf              # Linux: real clicks via xdotool, checks the saved PDF
 ```
 
 CI (`.github/workflows/ci.yml`) runs formatting, clippy, all tests and the
 benchmark on Windows, macOS and Linux, enforces the performance budget in
 `scripts/check_bench.py`, and uploads the portable zips. Tagging `v*`
 publishes a release.
+
+The UI test drives the real window with the mouse (highlight, pen, rectangle,
+Edit > Undo, File > Save) and then asks PDFium what the saved file contains.
 
 The engine tests cover rendering, tiles stitching into whole pages, rotation
 geometry, text and links, annotations surviving an in-place save, passwords,
@@ -95,6 +99,7 @@ and 150 truncated or corrupted files opened without a crash.
 bdf [file.pdf ...] [--page N] [--renderer gl|wgpu]
 bdf --bench [file] [--report path]
 bdf --generate N out.pdf
+bdf --list-annotations file.pdf      # what PDFium sees, one line per annotation
 ```
 
 If the window does not open on a virtual machine or over remote desktop

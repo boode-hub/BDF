@@ -94,7 +94,7 @@ impl Default for Settings {
             sidebar_width: 220.0,
             remember_page: true,
             restore_tabs: false,
-            cache_mib: 160,
+            cache_mib: 128,
             highlight_color: [255, 226, 64],
             ink_color: [220, 38, 38],
             ink_width: 2.0,
