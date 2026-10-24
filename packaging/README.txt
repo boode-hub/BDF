@@ -9,10 +9,11 @@ Keep the PDFium library (pdfium.dll / libpdfium.so / libpdfium.dylib) next to
 the program; BDF needs it to read PDFs.
 
 Open files with File > Open, by dropping them on the window, or with
-"Open with" in your file manager. Press F1-style help: Help > Keyboard shortcuts.
+"Open with" in your file manager. Help > Keyboard shortcuts lists them all.
 
 If the window does not appear on an old or virtual machine, start BDF with
   bdf --renderer wgpu
 or choose Graphics in Preferences.
 
-Licences: PDFium (BSD, PDFium-LICENSE.txt), Phosphor icons (MIT).
+Licences: PDFium (BSD-3-Clause) and its components, Phosphor icons (MIT);
+see the licenses folder.

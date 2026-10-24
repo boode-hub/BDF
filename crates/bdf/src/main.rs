@@ -7,6 +7,7 @@ mod bench;
 mod chrome;
 mod dialogs;
 mod doc;
+mod icon_pixels;
 mod logger;
 mod platform;
 mod print;

@@ -53,3 +53,41 @@ pub fn attach_console() {
 
 #[cfg(not(windows))]
 pub fn attach_console() {}
+
+/// `canonicalize` on Windows returns verbatim paths (`\\?\C:\x`, `\\?\UNC\srv\x`);
+/// turn them back into the ordinary form people recognise and other programs accept.
+pub fn clean_path(p: &Path) -> std::path::PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => std::path::PathBuf::from(rest),
+        _ => p.to_path_buf(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_paths_are_cleaned() {
+        assert_eq!(
+            clean_path(Path::new(r"\\?\C:\docs\a.pdf")),
+            Path::new(r"C:\docs\a.pdf")
+        );
+        assert_eq!(
+            clean_path(Path::new(r"\\?\UNC\srv\share\a.pdf")),
+            Path::new(r"\\srv\share\a.pdf")
+        );
+        assert_eq!(
+            clean_path(Path::new("/home/a.pdf")),
+            Path::new("/home/a.pdf")
+        );
+        assert_eq!(
+            clean_path(Path::new(r"\\?\Volume{x}\a.pdf")),
+            Path::new(r"\\?\Volume{x}\a.pdf")
+        );
+    }
+}

@@ -357,7 +357,9 @@ impl BdfApp {
 
     pub fn open_path(&mut self, path: &Path, pane: usize) {
         let pane = pane.min(self.panes.len() - 1);
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = crate::platform::clean_path(
+            &path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
+        );
         // Already open: show it.
         if let Some((&id, _)) = self
             .docs
