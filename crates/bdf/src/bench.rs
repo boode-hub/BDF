@@ -6,11 +6,14 @@ use crate::app::BdfApp;
 use crate::view::ZoomMode;
 use eframe::egui::{Context, ViewportCommand, vec2};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// How long the idle CPU is measured; long enough that the two frames the
-/// measurement itself causes do not dominate it.
+/// How long the idle CPU is measured.
 const IDLE_WINDOW: Duration = Duration::from_secs(10);
+/// Quiet time before the idle measurement starts, so the last frames of the
+/// run (and their painting) are not counted.
+const IDLE_LEAD_IN: Duration = Duration::from_secs(2);
 /// How long to wait for outstanding images before reporting them and moving on.
 const IMAGE_WAIT: Duration = Duration::from_secs(15);
 
@@ -23,8 +26,26 @@ enum Phase {
     Split(u32),
     Search(Instant),
     Settle(u32),
-    Idle(Instant, f64),
+    /// Idle CPU is measured on another thread, so the measurement itself
+    /// causes no frames; it fills this in (`Some(None)` if unsupported).
+    Idle(Arc<Mutex<Option<Option<f64>>>>),
     Done,
+}
+
+impl Phase {
+    fn name(&self) -> &'static str {
+        match self {
+            Phase::WaitOpen => "open",
+            Phase::WaitFirstRender => "first_render",
+            Phase::Scroll(_) => "scroll",
+            Phase::Zoom(_) => "zoom",
+            Phase::Split(_) => "split",
+            Phase::Search(_) => "search",
+            Phase::Settle(_) => "settle",
+            Phase::Idle(_) => "idle",
+            Phase::Done => "done",
+        }
+    }
 }
 
 pub struct Bench {
@@ -46,6 +67,9 @@ pub struct Bench {
     deadline: Instant,
     /// Since when the script has been waiting for outstanding images.
     waiting_since: Option<Instant>,
+    /// Wall time spent in each phase, to see where a slow run went.
+    phase_seconds: Vec<(&'static str, f64)>,
+    phase_started: Instant,
     failures: Vec<String>,
 }
 
@@ -82,8 +106,12 @@ impl Bench {
             idle_cpu_percent: None,
             pages: 0,
             idle_frames: 0,
-            deadline: Instant::now() + Duration::from_secs(180),
+            // Generous: runners without a GPU draw each frame in software
+            // (Windows' Basic Render Driver takes ~0.4 s a frame).
+            deadline: Instant::now() + Duration::from_secs(600),
             waiting_since: None,
+            phase_seconds: Vec::new(),
+            phase_started: Instant::now(),
             failures: Vec::new(),
         }
     }
@@ -112,6 +140,23 @@ impl Bench {
 
     /// Advances the script; returns false once finished.
     pub fn tick(&mut self, app: &mut BdfApp, ctx: &Context) -> bool {
+        let before = self.phase.name();
+        let keep = self.step(app, ctx);
+        if self.phase.name() != before {
+            let secs = self.phase_started.elapsed().as_secs_f64();
+            self.phase_seconds.push((before, secs));
+            self.phase_started = Instant::now();
+        }
+        if matches!(self.phase, Phase::Done) {
+            self.write(app);
+            app.force_close(ctx);
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+            return false;
+        }
+        keep
+    }
+
+    fn step(&mut self, app: &mut BdfApp, ctx: &Context) -> bool {
         if Instant::now() > self.deadline && !matches!(self.phase, Phase::Done) {
             let search = app
                 .active_tab()
@@ -230,36 +275,41 @@ impl Bench {
             Phase::Settle(n) => {
                 // Let rendering finish before measuring idle CPU.
                 if n > 30 && self.images_settled(app) {
-                    let cpu = crate::sysinfo::sample().cpu_secs.unwrap_or(0.0);
-                    self.phase = Phase::Idle(Instant::now(), cpu);
-                    // Come back after the idle window without forcing frames in between.
-                    ctx.request_repaint_after(IDLE_WINDOW);
+                    let result = Arc::new(Mutex::new(None));
+                    let (out, ctx) = (result.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        std::thread::sleep(IDLE_LEAD_IN);
+                        let t0 = Instant::now();
+                        let cpu0 = crate::sysinfo::sample().cpu_secs;
+                        std::thread::sleep(IDLE_WINDOW);
+                        let cpu1 = crate::sysinfo::sample().cpu_secs;
+                        let pct = cpu0
+                            .zip(cpu1)
+                            .map(|(a, b)| (b - a) / t0.elapsed().as_secs_f64() * 100.0);
+                        *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(pct);
+                        ctx.request_repaint();
+                    });
+                    self.phase = Phase::Idle(result);
                     return true;
                 }
                 self.phase = Phase::Settle(n + 1);
             }
-            Phase::Idle(t0, cpu0) => {
+            Phase::Idle(ref result) => {
+                // Any frame here is a repaint while nothing happens.
                 self.idle_frames += 1;
                 if self.idle_frames.is_multiple_of(50) {
                     log::warn!("still repainting while idle: {:?}", ctx.repaint_causes());
                 }
-                if t0.elapsed() < IDLE_WINDOW {
-                    ctx.request_repaint_after(IDLE_WINDOW - t0.elapsed());
-                    return true;
+                let done = *result.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(pct) = done {
+                    self.idle_cpu_percent = pct;
+                    self.phase = Phase::Done;
                 }
-                let cpu = crate::sysinfo::sample().cpu_secs.unwrap_or(cpu0);
-                self.idle_cpu_percent = Some((cpu - cpu0) / t0.elapsed().as_secs_f64() * 100.0);
-                self.phase = Phase::Done;
+                return true;
             }
             Phase::Done => {}
         }
-        if matches!(self.phase, Phase::Done) {
-            self.write(app);
-            app.force_close(ctx);
-            ctx.send_viewport_cmd(ViewportCommand::Close);
-            return false;
-        }
-        if !matches!(self.phase, Phase::Idle(..)) {
+        if !matches!(self.phase, Phase::Idle(..) | Phase::Done) {
             ctx.request_repaint();
         }
         true
@@ -314,6 +364,11 @@ impl Bench {
             "peak_rss_mb": stats.peak_rss_bytes.map(|b| b as f64 / 1_048_576.0),
             "cpu_seconds": stats.cpu_secs,
             "texture_mb": app.tiles.used_bytes() as f64 / 1_048_576.0,
+            "phase_seconds": self
+                .phase_seconds
+                .iter()
+                .map(|(name, s)| ((*name).to_string(), serde_json::json!(s)))
+                .collect::<serde_json::Map<_, _>>(),
             "failures": self.failures,
         });
         let text = serde_json::to_string_pretty(&report).unwrap_or_default();

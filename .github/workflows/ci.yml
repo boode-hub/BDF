@@ -74,7 +74,9 @@ jobs:
         run: scripts/package.sh ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         # Also on failure: the report, log and screenshots are what explain it.
+        # Best effort: a full Actions storage quota must not fail the build.
         if: always()
+        continue-on-error: true
         with:
           name: BDF-${{ matrix.platform }}
           path: |
@@ -83,6 +85,7 @@ jobs:
             bench-data/bdf.log
             shots/*.png
           if-no-files-found: warn
+          retention-days: 7
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
