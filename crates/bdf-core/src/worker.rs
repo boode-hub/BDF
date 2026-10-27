@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -192,6 +192,8 @@ pub struct Stats {
     pub tiles_dropped: AtomicU64,
     pub render_micros: AtomicU64,
     pub jobs_panicked: AtomicU64,
+    /// The engine thread has work queued (renders, search, annotation scan).
+    pub busy: AtomicBool,
 }
 
 pub struct WorkerHandle {
@@ -420,7 +422,9 @@ impl Worker {
     fn run(mut self) {
         while !self.shutdown {
             // Block when idle; otherwise just drain what has arrived.
-            if !self.has_work() {
+            let busy = self.has_work();
+            self.stats.busy.store(busy, Ordering::Relaxed);
+            if !busy {
                 match self.rx.recv_timeout(Duration::from_secs(3600)) {
                     Ok(r) => self.accept(r),
                     Err(RecvTimeoutError::Timeout) => continue,
@@ -1401,6 +1405,12 @@ mod tests {
             }
         }
         assert_eq!(pages, vec![2]);
+        // Nothing left to do: the benchmark's idle measurement waits for this.
+        let t0 = Instant::now();
+        while w.stats.busy.load(Ordering::Relaxed) {
+            assert!(t0.elapsed() < Duration::from_secs(5), "worker stays busy");
+            std::thread::yield_now();
+        }
     }
 
     #[test]

@@ -349,8 +349,14 @@ impl Bench {
                 };
             }
             Phase::Settle(n) => {
-                // Let rendering finish before measuring idle CPU.
-                if n > 30 && self.images_settled(app) {
+                // Let rendering and background work (the reopened document's
+                // scans) finish before measuring idle CPU; a slow machine
+                // would otherwise count them as idle.
+                let worker_busy = app
+                    .worker
+                    .as_ref()
+                    .is_some_and(|w| w.stats.busy.load(std::sync::atomic::Ordering::Relaxed));
+                if n > 30 && !worker_busy && self.images_settled(app) {
                     let result = Arc::new(Mutex::new(None));
                     let (out, ctx) = (result.clone(), ctx.clone());
                     std::thread::spawn(move || {
