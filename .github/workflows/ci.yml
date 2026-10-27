@@ -54,12 +54,13 @@ jobs:
       - name: Benchmark (real app, 2000 pages)
         # No pdfium next to the executable: the built-in copy is what ships, so that is what is measured.
         run: |
-          # The first run of a new executable is slow on Windows (antivirus
-          # scan); that is not BDF's start-up, so run it once beforehand.
-          target/release/bdf --generate 3 warmup.pdf
-          target/release/bdf --list-annotations warmup.pdf
+          # The first run of a new executable, and the first load of the PDFium
+          # it writes out, are slow (antivirus scan, macOS checks); that is not
+          # BDF's start-up, so do both once beforehand, into the same data folder.
           mkdir -p bench-data
           export BDF_DATA_DIR="$PWD/bench-data"
+          target/release/bdf --generate 3 warmup.pdf
+          target/release/bdf --list-annotations warmup.pdf
           mkdir -p shots
           if [ "$RUNNER_OS" = "Linux" ]; then
             BDF_BENCH_SHOTS="$PWD/shots" xvfb-run -a -s "-screen 0 1600x1000x24" target/release/bdf --bench --report bench.json
