@@ -120,7 +120,9 @@ jobs:
       - name: Checksums
         # Lets anyone confirm a download is intact, offline: sha256sum -c SHA256SUMS.txt
         run: |
-          mkdir -p upload && cp artifacts/*/*.zip upload/
+          # Each artifact keeps its folders (dist/...), so look for the zips.
+          mkdir -p upload && find artifacts -name 'BDF-*.zip' -exec cp {} upload/ \;
+          ls upload/*.zip
           (cd upload && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - uses: softprops/action-gh-release@v2
         with:
