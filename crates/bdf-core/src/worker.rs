@@ -122,6 +122,8 @@ pub struct SearchHit {
     pub page: u32,
     pub rects: Vec<[f32; 4]>,
     pub snippet: String,
+    /// The match inside `snippet` (byte range).
+    pub snippet_match: std::ops::Range<usize>,
 }
 
 #[derive(Debug)]
@@ -890,10 +892,14 @@ impl Worker {
                 let hits: Vec<SearchHit> = matches
                     .iter()
                     .take(room)
-                    .map(|m| SearchHit {
-                        page,
-                        rects: text.rects(m.start, m.end),
-                        snippet: text.snippet(*m, 40),
+                    .map(|m| {
+                        let (snippet, snippet_match) = text.snippet(*m, 40);
+                        SearchHit {
+                            page,
+                            rects: text.rects(m.start, m.end),
+                            snippet,
+                            snippet_match,
+                        }
                     })
                     .collect();
                 job.found += hits.len();

@@ -216,6 +216,7 @@ mod tests {
             page,
             rects: vec![],
             snippet: String::new(),
+            snippet_match: 0..0,
         }
     }
 

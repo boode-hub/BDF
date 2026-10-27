@@ -554,7 +554,10 @@ impl ViewState {
         }
         let page = j.page.min(n - 1);
         self.current_page = page;
-        if self.zoom_mode != ZoomMode::Custom {
+        // A jump to a spot (a search match, a link) keeps the zoom; re-fitting
+        // to a page of another size there would zoom in or out unasked.
+        let to_spot = j.rect_user.is_some() || j.y_user.is_some();
+        if self.zoom_mode != ZoomMode::Custom && !to_spot {
             self.zoom = self.fit_zoom(self.zoom_mode);
             self.render_zoom = self.zoom;
         }
@@ -1861,6 +1864,47 @@ mod tests {
             v.scroll_by(vec2(0.0, 30.0));
         }
         assert_eq!(v.current_page, 3);
+    }
+
+    #[test]
+    fn search_jump_keeps_fit_width_zoom() {
+        let sizes = vec![(612.0, 792.0), (612.0, 792.0), (300.0, 420.0)];
+        let doc = DocState::new(
+            bdf_core::engine::DocId(1),
+            bdf_core::engine::DocInfo {
+                path: "t.pdf".into(),
+                file_size: 0,
+                page_sizes: sizes.clone(),
+                page_labels: vec![None; 3],
+                outline: vec![],
+                metadata: vec![],
+                pdf_version: None,
+                encrypted: false,
+                fingerprint: String::new(),
+                form_fields: false,
+            },
+        );
+        let mut v = ViewState::new(PageMode::Continuous, false, ZoomMode::FitWidth);
+        v.viewport = vec2(1000.0, 700.0);
+        v.ensure_layout(&doc);
+        v.goto(0, false);
+        v.apply_pending(&doc);
+        let z = v.zoom;
+        // A match on the small page: same zoom.
+        v.jump(
+            Jump {
+                page: 2,
+                y_user: None,
+                rect_user: Some([40.0, 330.0, 90.0, 345.0]),
+            },
+            true,
+        );
+        v.apply_pending(&doc);
+        assert_eq!((v.current_page, v.zoom), (2, z));
+        // Going to the page itself still fits it.
+        v.goto(2, false);
+        v.apply_pending(&doc);
+        assert!(v.zoom > z * 1.5, "{} vs {z}", v.zoom);
     }
 
     #[test]

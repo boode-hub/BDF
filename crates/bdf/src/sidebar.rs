@@ -387,45 +387,140 @@ impl BdfApp {
     }
 
     fn search_list(&mut self, ui: &mut Ui, doc: DocId) -> Option<Nav> {
+        const ROW: f32 = 46.0;
+        const BADGE_W: f32 = 38.0;
+        let pal = theme::palette(ui.visuals().dark_mode);
         let d = self.docs.get_mut(&doc)?;
         let Some(s) = d.search.as_mut() else {
+            ui.add_space(8.0);
             ui.weak("Press Ctrl+F to search this document.");
             return None;
         };
+
+        // Summary: how many, for what, where.
+        let pages = s.hits.windows(2).filter(|w| w[0].page != w[1].page).count()
+            + usize::from(!s.hits.is_empty());
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!("{} result(s) for “{}”", s.count_label(), s.query)).strong(),
-            );
+            let n = s.count_label();
+            let text = match (s.hits.len(), s.done) {
+                (0, true) => "No matches".to_string(),
+                (1, _) => "1 match".to_string(),
+                _ => format!("{n} matches"),
+            };
+            ui.label(RichText::new(text).size(15.0).strong());
             if !s.done {
                 crate::theme::spinner(ui, 14.0);
             }
         });
-        let mut nav = None;
-        let mut pick = None;
-        egui::ScrollArea::vertical()
+        let detail = if s.done {
+            match pages {
+                0 => format!("for “{}”", s.query),
+                1 => format!("for “{}” on 1 page", s.query),
+                p => format!("for “{}” on {p} pages", s.query),
+            }
+        } else {
+            format!(
+                "for “{}” · searching {} of {} pages",
+                s.query, s.searched, s.total
+            )
+        };
+        ui.label(RichText::new(detail).size(12.0).color(pal.muted));
+        if s.hits.is_empty() && s.done && (s.opts.match_case || s.opts.whole_word) {
+            ui.label(
+                RichText::new("Match case or Whole words is on; try turning it off.")
+                    .size(12.0)
+                    .color(pal.muted),
+            );
+        }
+        ui.add_space(6.0);
+        ui.separator();
+
+        // Follow the current match (F3, Enter) when it is out of sight.
+        let follow_id = Id::unique(("search-follow", doc.0));
+        let (seen, visible) = ui
+            .data(|m| m.get_temp::<(Option<usize>, std::ops::Range<usize>)>(follow_id))
+            .unwrap_or((None, 0..0));
+        let mut area = egui::ScrollArea::vertical()
             .id_salt(("search", doc.0))
-            .auto_shrink([false, false])
-            .show_rows(ui, 40.0, s.hits.len(), |ui, range| {
-                for i in range {
-                    let h = &s.hits[i];
-                    let sel = s.current == Some(i);
-                    let r = ui.add(
-                        egui::Button::selectable(
-                            sel,
-                            RichText::new(format!(
-                                "{}\n{}",
-                                one_line(&h.snippet, 70),
-                                RichText::new(format!("page {}", h.page + 1)).text()
-                            ))
-                            .size(12.5),
-                        )
-                        .min_size(vec2(ui.available_width(), 36.0)),
+            .auto_shrink([false, false]);
+        if let Some(c) = s.current
+            && seen != s.current
+            && !(visible.start < c && c + 1 < visible.end)
+        {
+            area = area.vertical_scroll_offset((c as f32 * ROW - ROW * 2.0).max(0.0));
+        }
+        let mut pick = None;
+        let mut shown = 0..0;
+        area.show_rows(ui, ROW, s.hits.len(), |ui, range| {
+            shown = range.clone();
+            let text_color = ui.visuals().strong_text_color();
+            let context_color = ui.visuals().text_color();
+            for i in range {
+                let h = &s.hits[i];
+                let sel = s.current == Some(i);
+                let first_on_page = i == 0 || s.hits[i - 1].page != h.page;
+                let (rect, r) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+                let p = ui.painter();
+                if first_on_page && i > 0 {
+                    p.hline(
+                        rect.x_range(),
+                        rect.top(),
+                        Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
                     );
-                    if r.clicked() {
-                        pick = Some(i);
-                    }
                 }
-            });
+                let body = rect.shrink2(vec2(0.0, 2.0));
+                if sel {
+                    p.rect_filled(body, CornerRadius::same(6), pal.accent_soft);
+                    p.rect_filled(
+                        egui::Rect::from_min_size(body.min, vec2(3.0, body.height())),
+                        CornerRadius::same(2),
+                        pal.accent,
+                    );
+                } else if r.hovered() {
+                    p.rect_filled(
+                        body,
+                        CornerRadius::same(6),
+                        ui.visuals().widgets.hovered.weak_bg_fill,
+                    );
+                }
+                if first_on_page {
+                    let badge = egui::Rect::from_min_size(
+                        body.min + vec2(7.0, 5.0),
+                        vec2(BADGE_W - 8.0, 18.0),
+                    );
+                    let (fill, ink) = if sel {
+                        (pal.accent, Color32::WHITE)
+                    } else {
+                        (ui.visuals().widgets.inactive.bg_fill, text_color)
+                    };
+                    p.rect_filled(badge, CornerRadius::same(5), fill);
+                    p.text(
+                        badge.center(),
+                        egui::Align2::CENTER_CENTER,
+                        (h.page + 1).to_string(),
+                        egui::FontId::proportional(11.5),
+                        ink,
+                    );
+                }
+                let job = snippet_job(h, pal.search_hit, text_color, context_color);
+                let text_rect = egui::Rect::from_min_max(
+                    pos2(body.left() + BADGE_W + 6.0, body.top() + 4.0),
+                    pos2(body.right() - 6.0, body.bottom()),
+                );
+                let mut job = job;
+                job.wrap.max_width = text_rect.width();
+                let galley = ui.fonts_mut(|f| f.layout_job(job));
+                p.galley(text_rect.min, galley, text_color);
+                let r = r.on_hover_text(format!("Page {}", h.page + 1));
+                if r.clicked() {
+                    pick = Some(i);
+                }
+            }
+        });
+        ui.data_mut(|m| m.insert_temp(follow_id, (s.current, shown)));
+        let mut nav = None;
         if let Some(i) = pick {
             s.current = Some(i);
             let h = &s.hits[i];
@@ -437,6 +532,60 @@ impl BdfApp {
         }
         nav
     }
+}
+
+/// Two lines of excerpt with the match highlighted, starting shortly before
+/// the match so it is always in view.
+fn snippet_job(
+    h: &bdf_core::worker::SearchHit,
+    mark: Color32,
+    strong: Color32,
+    context: Color32,
+) -> egui::text::LayoutJob {
+    use egui::text::{LayoutJob, TextFormat};
+    const LEAD: usize = 22;
+    let font = egui::FontId::proportional(12.5);
+    let (s, m) = (&h.snippet, h.snippet_match.clone());
+    let m = if s.is_char_boundary(m.start) && s.is_char_boundary(m.end) && m.end <= s.len() {
+        m
+    } else {
+        0..0
+    };
+    let before = &s[..m.start];
+    let lead: String = if before.chars().count() > LEAD {
+        let tail: String = before
+            .chars()
+            .rev()
+            .take(LEAD)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        // Start at a word, not in the middle of one.
+        let tail = tail
+            .split_once(' ')
+            .map_or(tail.as_str(), |(_, t)| t)
+            .to_string();
+        format!("…{tail}")
+    } else {
+        before.to_string()
+    };
+    let plain = TextFormat::simple(font.clone(), context);
+    let mut job = LayoutJob::default();
+    job.wrap.max_rows = 2;
+    job.wrap.overflow_character = Some('…');
+    job.append(&lead, 0.0, plain.clone());
+    job.append(
+        &s[m.clone()],
+        0.0,
+        TextFormat {
+            color: strong,
+            background: mark,
+            ..TextFormat::simple(font, strong)
+        },
+    );
+    job.append(&s[m.end..], 0.0, plain);
+    job
 }
 
 fn one_line(s: &str, max: usize) -> String {

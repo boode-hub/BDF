@@ -304,25 +304,37 @@ impl PageText {
         Some((s, e.max(i + 1)))
     }
 
-    /// A short excerpt around a match for result lists.
-    pub fn snippet(&self, m: Match, context: usize) -> String {
+    /// A short excerpt around a match for result lists, and where the match
+    /// is in it (byte range).
+    pub fn snippet(&self, m: Match, context: usize) -> (String, std::ops::Range<usize>) {
         let s = m.start.saturating_sub(context);
         let e = (m.end + context).min(self.chars.len());
-        let mut t: String = self
-            .slice(s, e)
-            .chars()
-            .map(|c| if c.is_whitespace() { ' ' } else { c })
-            .collect();
-        t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        // Whitespace runs become one space; spaces at the edges are kept so
+        // the three parts join as they were.
+        let tidy = |a: usize, b: usize| {
+            let mut t = String::new();
+            for c in self.slice(a, b).chars() {
+                let c = if c.is_whitespace() { ' ' } else { c };
+                if !(c == ' ' && t.ends_with(' ')) {
+                    t.push(c);
+                }
+            }
+            t
+        };
         let mut out = String::new();
         if s > 0 {
             out.push('…');
         }
-        out.push_str(&t);
+        out.push_str(tidy(s, m.start).trim_start());
+        let hit = tidy(m.start, m.end);
+        let start = out.len();
+        out.push_str(hit.trim());
+        let end = out.len();
+        out.push_str(tidy(m.end, e).trim_end());
         if e < self.chars.len() {
             out.push('…');
         }
-        out
+        (out, start..end)
     }
 }
 
@@ -509,6 +521,12 @@ mod tests {
     fn snippet_has_context_and_ellipses() {
         let p = page(&["one two three four five six seven"]);
         let m = p.search("four", Default::default())[0];
-        assert_eq!(p.snippet(m, 6), "…three four five…");
+        let (s, r) = p.snippet(m, 6);
+        assert_eq!(s, "…three four five…");
+        assert_eq!(&s[r], "four");
+        // At the start of the text: no ellipsis, the range still lands.
+        let m = p.search("one", Default::default())[0];
+        let (s, r) = p.snippet(m, 4);
+        assert_eq!((s.as_str(), &s[r]), ("one two…", "one"));
     }
 }
