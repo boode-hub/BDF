@@ -524,9 +524,16 @@ fn bad_input_never_panics() {
     );
     let _ = e.open(DocId(1), tmp("").as_path(), None).unwrap_err();
 
-    // Truncated and corrupted copies: either open (PDFium repairs) or fail
-    // cleanly; when they open, every page renders or errors cleanly.
-    let good = long_document(5);
+    // Truncated and corrupted copies of every kind of test file (plain text,
+    // links and outline, annotations, form fields, hidden text): either open
+    // (PDFium repairs) or fail cleanly; when they open, every page renders,
+    // gives its text, links and fields, and can be searched, or errors cleanly.
+    let originals = [
+        long_document(5),
+        sample(),
+        bdf_core::testpdf::form_document(),
+        bdf_core::testpdf::hidden_text_document(),
+    ];
     let mut seed = 0x9E3779B9u32;
     let mut rand = || {
         seed ^= seed << 13;
@@ -535,9 +542,9 @@ fn bad_input_never_panics() {
         seed
     };
     let mut opened = 0;
-    for i in 0..150 {
-        let mut bytes = good.clone();
-        match i % 3 {
+    for i in 0..600 {
+        let mut bytes = originals[i as usize % originals.len()].clone();
+        match (i / 4) % 3 {
             0 => bytes.truncate((rand() as usize) % bytes.len()),
             1 => {
                 for _ in 0..1 + rand() % 20 {
@@ -556,14 +563,16 @@ fn bad_input_never_panics() {
             opened += 1;
             for page in 0..info.page_sizes.len() as u32 {
                 let _ = e.render(&thumb(DocId(100 + i), page));
-                let _ = e.page_data(DocId(100 + i), page);
+                if let Ok(d) = e.page_data(DocId(100 + i), page) {
+                    let _ = d.text.search("e", Default::default());
+                }
             }
             e.close(DocId(100 + i));
         }
         let _ = std::fs::remove_file(&p);
     }
     assert!(
-        opened > 10,
+        opened > 40,
         "PDFium should repair many damaged files ({opened} opened)"
     );
 }

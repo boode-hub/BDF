@@ -394,7 +394,7 @@ impl BdfApp {
         };
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!("{} result(s) for “{}”", s.hits.len(), s.query)).strong(),
+                RichText::new(format!("{} result(s) for “{}”", s.count_label(), s.query)).strong(),
             );
             if !s.done {
                 crate::theme::spinner(ui, 14.0);

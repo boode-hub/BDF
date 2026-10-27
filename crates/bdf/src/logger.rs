@@ -6,8 +6,13 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 
+/// A session stops logging after this much, so a warning repeated every
+/// frame can never fill the disk.
+const SESSION_LIMIT: u64 = 4 << 20;
+
 struct FileLogger {
-    file: Mutex<Option<File>>,
+    /// The log file and the bytes written to it this session.
+    file: Mutex<(Option<File>, u64)>,
     start: Instant,
     echo: bool,
 }
@@ -36,16 +41,23 @@ impl log::Log for FileLogger {
         if self.echo {
             eprint!("{line}");
         }
-        if let Ok(mut g) = self.file.lock()
-            && let Some(f) = g.as_mut()
-        {
-            let _ = f.write_all(line.as_bytes());
+        if let Ok(mut g) = self.file.lock() {
+            let (file, written) = &mut *g;
+            if let Some(f) = file.as_mut() {
+                *written += line.len() as u64;
+                let _ = f.write_all(line.as_bytes());
+                if *written > SESSION_LIMIT {
+                    let _ =
+                        f.write_all(b"log limit reached; nothing more is logged this session\n");
+                    *file = None;
+                }
+            }
         }
     }
 
     fn flush(&self) {
         if let Ok(mut g) = self.file.lock()
-            && let Some(f) = g.as_mut()
+            && let Some(f) = g.0.as_mut()
         {
             let _ = f.flush();
         }
@@ -62,7 +74,7 @@ pub fn init(path: &Path, echo: bool) {
     }
     let file = OpenOptions::new().create(true).append(true).open(path).ok();
     let logger = Box::new(FileLogger {
-        file: Mutex::new(file),
+        file: Mutex::new((file, 0)),
         start: Instant::now(),
         echo,
     });

@@ -16,6 +16,9 @@ const IDLE_WINDOW: Duration = Duration::from_secs(10);
 const IDLE_LEAD_IN: Duration = Duration::from_secs(2);
 /// How long to wait for outstanding images before reporting them and moving on.
 const IMAGE_WAIT: Duration = Duration::from_secs(15);
+/// Times the document is closed and reopened; memory growth from the second
+/// time to the last shows a leak.
+const REOPENS: u32 = 20;
 
 #[derive(Debug)]
 enum Phase {
@@ -25,6 +28,13 @@ enum Phase {
     Zoom(u32),
     Split(u32),
     Search(Instant),
+    /// A one-letter search: more hits than the limit, so memory must stay flat.
+    BroadSearch(Instant),
+    /// Close and reopen the document; `frames` counts frames since reopening.
+    Reopen {
+        cycle: u32,
+        frames: u32,
+    },
     Settle(u32),
     /// Idle CPU is measured on another thread, so the measurement itself
     /// causes no frames; it fills this in (`Some(None)` if unsupported).
@@ -41,6 +51,8 @@ impl Phase {
             Phase::Zoom(_) => "zoom",
             Phase::Split(_) => "split",
             Phase::Search(_) => "search",
+            Phase::BroadSearch(_) => "broad_search",
+            Phase::Reopen { .. } => "reopen",
             Phase::Settle(_) => "settle",
             Phase::Idle(_) => "idle",
             Phase::Done => "done",
@@ -61,6 +73,11 @@ pub struct Bench {
     first_render_ms: Option<f64>,
     search_ms: Option<f64>,
     search_hits: usize,
+    broad_search_ms: Option<f64>,
+    broad_search_hits: usize,
+    /// Memory after the second reopen, the baseline for spotting leaks.
+    reopen_base_rss: Option<u64>,
+    reopen_rss_growth_mb: Option<f64>,
     idle_cpu_percent: Option<f64>,
     pages: usize,
     idle_frames: u32,
@@ -69,6 +86,8 @@ pub struct Bench {
     waiting_since: Option<Instant>,
     /// Wall time spent in each phase, to see where a slow run went.
     phase_seconds: Vec<(&'static str, f64)>,
+    /// Memory at the end of each phase, to see which one holds on to it.
+    phase_rss: Vec<(&'static str, Option<u64>)>,
     phase_started: Instant,
     failures: Vec<String>,
 }
@@ -103,6 +122,10 @@ impl Bench {
             first_render_ms: None,
             search_ms: None,
             search_hits: 0,
+            broad_search_ms: None,
+            broad_search_hits: 0,
+            reopen_base_rss: None,
+            reopen_rss_growth_mb: None,
             idle_cpu_percent: None,
             pages: 0,
             idle_frames: 0,
@@ -111,6 +134,7 @@ impl Bench {
             deadline: Instant::now() + Duration::from_secs(600),
             waiting_since: None,
             phase_seconds: Vec::new(),
+            phase_rss: Vec::new(),
             phase_started: Instant::now(),
             failures: Vec::new(),
         }
@@ -145,6 +169,8 @@ impl Bench {
         if self.phase.name() != before {
             let secs = self.phase_started.elapsed().as_secs_f64();
             self.phase_seconds.push((before, secs));
+            self.phase_rss
+                .push((before, crate::sysinfo::sample().rss_bytes));
             self.phase_started = Instant::now();
         }
         if matches!(self.phase, Phase::Done) {
@@ -265,12 +291,62 @@ impl Bench {
                     shot("4-search");
                     self.search_ms = Some(ms(t0.elapsed()));
                     self.search_hits = hits;
+                    app.find.query = "e".into();
+                    app.run_search();
+                    self.phase = Phase::BroadSearch(Instant::now());
+                }
+            }
+            Phase::BroadSearch(t0) => {
+                let done = app
+                    .active_tab()
+                    .and_then(|t| app.docs.get(&t.doc))
+                    .and_then(|d| d.search.as_ref())
+                    .map(|s| (s.done, s.hits.len()));
+                if let Some((true, hits)) = done {
+                    self.broad_search_ms = Some(ms(t0.elapsed()));
+                    self.broad_search_hits = hits;
                     app.close_find();
                     if let Some(v) = app.active_view_mut() {
                         v.goto(0, false);
                     }
-                    self.phase = Phase::Settle(0);
+                    self.phase = Phase::Reopen {
+                        cycle: 1,
+                        frames: 0,
+                    };
                 }
+            }
+            Phase::Reopen { cycle, frames } => {
+                if frames == 0 {
+                    app.close_tab(0, 0, true);
+                    let file = self.file.clone();
+                    app.open_path(&file, 0);
+                } else if frames > 5
+                    && app.active_tab().is_some()
+                    && app.tiles.len() > 0
+                    && self.images_settled(app)
+                {
+                    let rss = crate::sysinfo::sample().rss_bytes;
+                    if cycle == 2 {
+                        self.reopen_base_rss = rss;
+                    }
+                    if cycle >= REOPENS {
+                        self.reopen_rss_growth_mb = rss
+                            .zip(self.reopen_base_rss)
+                            .map(|(now, base)| (now as f64 - base as f64) / 1_048_576.0);
+                        self.phase = Phase::Settle(0);
+                    } else {
+                        self.phase = Phase::Reopen {
+                            cycle: cycle + 1,
+                            frames: 0,
+                        };
+                    }
+                    ctx.request_repaint();
+                    return true;
+                }
+                self.phase = Phase::Reopen {
+                    cycle,
+                    frames: frames + 1,
+                };
             }
             Phase::Settle(n) => {
                 // Let rendering finish before measuring idle CPU.
@@ -358,6 +434,10 @@ impl Bench {
             "avg_tile_ms": render_us as f64 / 1000.0 / rendered.max(1) as f64,
             "search_ms": self.search_ms,
             "search_hits": self.search_hits,
+            "broad_search_ms": self.broad_search_ms,
+            "broad_search_hits": self.broad_search_hits,
+            "reopen_cycles": REOPENS,
+            "reopen_rss_growth_mb": self.reopen_rss_growth_mb,
             "idle_cpu_percent": self.idle_cpu_percent,
             "idle_frames": self.idle_frames,
             "rss_mb": stats.rss_bytes.map(|b| b as f64 / 1_048_576.0),
@@ -368,6 +448,11 @@ impl Bench {
                 .phase_seconds
                 .iter()
                 .map(|(name, s)| ((*name).to_string(), serde_json::json!(s)))
+                .collect::<serde_json::Map<_, _>>(),
+            "phase_rss_mb": self
+                .phase_rss
+                .iter()
+                .map(|(name, b)| ((*name).to_string(), serde_json::json!(b.map(|b| b as f64 / 1_048_576.0))))
                 .collect::<serde_json::Map<_, _>>(),
             "failures": self.failures,
         });

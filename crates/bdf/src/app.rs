@@ -153,6 +153,8 @@ pub struct BdfApp {
     pub settings: Settings,
     pub settings_changed: bool,
     last_settings_save: Instant,
+    /// The settings write in progress, off the UI thread (it waits for the disk).
+    settings_saver: Option<std::thread::JoinHandle<()>>,
     pub worker: Option<WorkerHandle>,
     pub engine_error: Option<String>,
     pub docs: HashMap<DocId, DocState>,
@@ -244,6 +246,7 @@ impl BdfApp {
             settings,
             settings_changed: false,
             last_settings_save: Instant::now(),
+            settings_saver: None,
             worker,
             engine_error,
             docs: HashMap::new(),
@@ -1405,6 +1408,12 @@ impl BdfApp {
         ctx.global_style().visuals.dark_mode
     }
 
+    fn wait_for_settings_save(&mut self) {
+        if let Some(h) = self.settings_saver.take() {
+            let _ = h.join();
+        }
+    }
+
     fn save_settings_now(&mut self) {
         // Remember open tabs and positions.
         let mut tabs = Vec::new();
@@ -1423,9 +1432,14 @@ impl BdfApp {
             self.settings.doc_mut(&fp).last_page = page as u32;
         }
         self.settings.open_tabs = tabs;
-        if let Err(e) = self.data.save(&self.settings) {
-            log::warn!("could not save settings: {e}");
-        }
+        // One write at a time; the previous one finished long ago (saves are 10 s apart).
+        self.wait_for_settings_save();
+        let (data, settings) = (self.data.clone(), self.settings.clone());
+        self.settings_saver = Some(std::thread::spawn(move || {
+            if let Err(e) = data.save(&settings) {
+                log::warn!("could not save settings: {e}");
+            }
+        }));
         self.settings_changed = false;
         self.last_settings_save = Instant::now();
     }
@@ -2073,6 +2087,7 @@ impl eframe::App for BdfApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_settings_now();
+        self.wait_for_settings_save();
         log::info!("exiting");
     }
 }

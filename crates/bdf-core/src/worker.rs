@@ -305,8 +305,14 @@ struct SearchJob {
     /// Pages still to search, in order (wrapping from the start page).
     queue: VecDeque<u32>,
     searched: u32,
+    /// Hits sent so far; the search stops at [`MAX_SEARCH_HITS`].
+    found: usize,
     last_progress: Instant,
 }
+
+/// A search stops after this many hits, so searching for "e" in a huge
+/// book cannot fill memory: plenty to navigate, about 2 MB at most.
+pub const MAX_SEARCH_HITS: usize = 10_000;
 
 enum Control {
     Open {
@@ -529,6 +535,7 @@ impl Worker {
                         total,
                         queue,
                         searched: 0,
+                        found: 0,
                         last_progress: Instant::now(),
                     },
                 );
@@ -874,15 +881,18 @@ impl Worker {
         job.searched += 1;
         if let Ok(text) = text {
             let matches: Vec<Match> = text.search(&job.query, job.opts);
+            let room = MAX_SEARCH_HITS - job.found;
             if !matches.is_empty() {
-                let hits = matches
+                let hits: Vec<SearchHit> = matches
                     .iter()
+                    .take(room)
                     .map(|m| SearchHit {
                         page,
                         rects: text.rects(m.start, m.end),
                         snippet: text.snippet(*m, 40),
                     })
                     .collect();
+                job.found += hits.len();
                 self.send(Response::SearchHits {
                     doc,
                     ticket: job.ticket,
@@ -890,7 +900,7 @@ impl Worker {
                 });
             }
         }
-        let done = job.queue.is_empty();
+        let done = job.queue.is_empty() || job.found >= MAX_SEARCH_HITS;
         if done || job.last_progress.elapsed() > Duration::from_millis(100) {
             job.last_progress = Instant::now();
             self.send(Response::SearchProgress {
@@ -1213,6 +1223,38 @@ mod tests {
             }
         }
         assert_eq!(pages, vec![6, 9, 0, 3]);
+    }
+
+    #[test]
+    fn search_stops_at_the_hit_limit() {
+        // One hit on every third page: 3 * MAX + 30 pages hold MAX + 10 hits.
+        let pages = 3 * MAX_SEARCH_HITS as u32 + 30;
+        let (w, _log) = start(pages);
+        let doc = open(&w);
+        w.send(Request::Search {
+            doc,
+            ticket: 1,
+            query: "needle".into(),
+            opts: SearchOptions::default(),
+            start_page: 0,
+        });
+        let mut found = 0;
+        loop {
+            match recv(&w) {
+                Response::SearchHits { hits, .. } => found += hits.len(),
+                Response::SearchProgress {
+                    done: true,
+                    searched,
+                    ..
+                } => {
+                    assert!(searched < pages, "stopped early, not after every page");
+                    break;
+                }
+                Response::SearchProgress { .. } => {}
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(found, MAX_SEARCH_HITS);
     }
 
     #[test]

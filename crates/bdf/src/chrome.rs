@@ -1006,7 +1006,7 @@ impl BdfApp {
                                 let t = if count == 0 && s.done {
                                     "No results".to_string()
                                 } else {
-                                    format!("{pos} / {count}")
+                                    format!("{pos} / {}", s.count_label())
                                 };
                                 ui.label(RichText::new(t).size(12.5).color(
                                     if count == 0 && s.done {

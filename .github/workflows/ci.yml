@@ -15,7 +15,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -39,7 +39,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Linux packages
@@ -52,8 +52,8 @@ jobs:
       - name: Build release
         run: cargo build --release -p bdf
       - name: Benchmark (real app, 2000 pages)
+        # No pdfium next to the executable: the built-in copy is what ships, so that is what is measured.
         run: |
-          cp .pdfium/*pdfium* target/release/
           # The first run of a new executable is slow on Windows (antivirus
           # scan); that is not BDF's start-up, so run it once beforehand.
           target/release/bdf --generate 3 warmup.pdf
@@ -76,6 +76,21 @@ jobs:
         run: scripts/ui_smoke.sh target/release/bdf shots
       - name: Package portable zip
         run: scripts/package.sh ${{ matrix.platform }}
+      - name: Portable zip runs on its own
+        # Unzipped into an empty folder, with no PDFium anywhere else to find:
+        # the executable must bring its own engine.
+        run: |
+          lone="$RUNNER_TEMP/lone" && rm -rf "$lone" && mkdir -p "$lone"
+          python3 -m zipfile -e dist/*.zip "$lone"
+          if find "$lone" -iname '*pdfium*' ! -iname '*LICENSE*' | grep .; then
+            echo "the zip ships a separate PDFium; it must be built into the executable"; exit 1
+          fi
+          app="$(find "$lone" -maxdepth 2 -type f \( -name bdf -o -name bdf.exe \))"
+          chmod +x "$app"   # zipfile does not keep the executable bit
+          unset BDF_PDFIUM BDF_DATA_DIR
+          "$app" --generate 3 "$lone/t.pdf"
+          "$app" --list-annotations "$lone/t.pdf"
+          ls "$(dirname "$app")"/BDF-data/engine/*/
       - uses: actions/upload-artifact@v4
         # Also on failure: the report, log and screenshots are what explain it.
         # Best effort: a full Actions storage quota must not fail the build.
@@ -101,6 +116,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: Checksums
+        # Lets anyone confirm a download is intact, offline: sha256sum -c SHA256SUMS.txt
+        run: |
+          mkdir -p upload && cp artifacts/*/*.zip upload/
+          (cd upload && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: upload/*

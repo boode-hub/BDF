@@ -107,7 +107,7 @@ impl Default for Settings {
             sidebar_width: 220.0,
             remember_page: true,
             restore_tabs: false,
-            cache_mib: 128,
+            cache_mib: 64,
             highlight_color: [255, 226, 64],
             ink_color: [220, 38, 38],
             ink_width: 2.0,
@@ -294,7 +294,11 @@ pub fn load_settings(file: &Path) -> Settings {
 pub fn save_settings(file: &Path, s: &Settings) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(s).map_err(std::io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
+    // On disk before the rename, so a power cut leaves the old file or the new one, never an empty one.
+    let mut f = std::fs::File::create(&tmp)?;
+    std::io::Write::write_all(&mut f, &json)?;
+    f.sync_all()?;
+    drop(f);
     std::fs::rename(&tmp, file)
 }
 

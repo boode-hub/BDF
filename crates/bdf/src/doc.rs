@@ -23,6 +23,16 @@ pub struct SearchState {
 }
 
 impl SearchState {
+    /// The number of hits, with a "+" once the search stopped at its limit.
+    pub fn count_label(&self) -> String {
+        let n = self.hits.len();
+        if n >= bdf_core::worker::MAX_SEARCH_HITS {
+            format!("{n}+")
+        } else {
+            n.to_string()
+        }
+    }
+
     pub fn add_hits(&mut self, hits: Vec<SearchHit>) {
         let Some(page) = hits.first().map(|h| h.page) else {
             return;

@@ -114,6 +114,14 @@ fn extract_embedded(bytes: &[u8], dir: &Path) -> Option<PathBuf> {
     if std::fs::rename(&part, &path).is_err() {
         let _ = std::fs::remove_file(&part);
     }
+    // Copies from earlier versions go; one still loaded by a running BDF stays until next time.
+    let current = path.parent()?.file_name()?.to_owned();
+    for old in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = old.file_name();
+        if name != current && name.to_string_lossy().starts_with("pdfium-") {
+            let _ = std::fs::remove_dir_all(old.path());
+        }
+    }
     path.exists().then_some(path)
 }
 
@@ -1883,8 +1891,12 @@ mod tests {
             std::fs::metadata(&path).unwrap().modified().unwrap(),
             written
         );
-        // A different build goes into its own folder instead of over the file in use.
-        assert_ne!(extract_embedded(b"another build", &dir), Some(path));
+        // A different build goes into its own folder instead of over the file in use,
+        // and the old copy is cleared away.
+        let newer = extract_embedded(b"another build", &dir).expect("written");
+        assert_ne!(newer, path);
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

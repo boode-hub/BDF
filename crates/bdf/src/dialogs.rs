@@ -446,7 +446,7 @@ impl BdfApp {
                             ui.end_row();
                             ui.label("Image memory");
                             ui.add(
-                                egui::Slider::new(&mut s.cache_mib, 64..=2048)
+                                egui::Slider::new(&mut s.cache_mib, 32..=2048)
                                     .suffix(" MB")
                                     .logarithmic(true),
                             );
