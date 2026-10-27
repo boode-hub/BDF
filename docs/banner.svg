@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 420" width="1280" height="420">
+  <defs>
+    <radialGradient id="bg" cx="27%" cy="50%" r="80%">
+      <stop offset="0" stop-color="#3d0000"/>
+      <stop offset="0.45" stop-color="#140000"/>
+      <stop offset="1" stop-color="#050000"/>
+    </radialGradient>
+    <radialGradient id="iris">
+      <stop offset="0" stop-color="#660000"/>
+      <stop offset="0.5" stop-color="#c30000"/>
+      <stop offset="1" stop-color="#a00000"/>
+    </radialGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#ff1a1a" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ff1a1a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff3b3b"/>
+      <stop offset="1" stop-color="#b30000"/>
+    </linearGradient>
+    <g id="tomoe">
+      <path d="M 107.5,150 C 110,100 130,20 150,0 C 170,20 190,100 192.5,150 C 168,150 132,150 107.5,150 z"/>
+      <path d="M 250.2,181.2 C 261.8,142 250.4,46.8 157.4,10 C 154.9,31.7 161.1,51.3 178.8,67.3 C 216.6,76 258.3,118.6 244.6,175.2 C 224.9,193.2 242.3,203.3 250.2,181.2 z"/>
+    </g>
+    <style>
+      .spin { transform-origin: 150px 150px; animation: spin 9s linear infinite; }
+      .pulse { transform-origin: 345px 210px; animation: pulse 3s ease-in-out infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes pulse { 50% { opacity: 0.55; transform: scale(1.06); } }
+      text { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="420" fill="url(#bg)"/>
+  <g stroke="#ff2020" stroke-opacity="0.07" fill="none">
+    <circle cx="345" cy="210" r="190"/><circle cx="345" cy="210" r="250"/><circle cx="345" cy="210" r="320"/><circle cx="345" cy="210" r="400"/>
+  </g>
+  <circle class="pulse" cx="345" cy="210" r="190" fill="url(#glow)"/>
+
+  <g transform="translate(205 70) scale(0.9333)">
+    <circle cx="150" cy="150" r="145" fill="url(#iris)" stroke="#000" stroke-width="10"/>
+    <g class="spin" fill="#000">
+      <use href="#tomoe" xlink:href="#tomoe"/>
+      <use href="#tomoe" xlink:href="#tomoe" transform="rotate(120 150 150)"/>
+      <use href="#tomoe" xlink:href="#tomoe" transform="rotate(-120 150 150)"/>
+    </g>
+    <circle cx="150" cy="150" r="28" fill="#a00000"/>
+  </g>
+
+  <text x="640" y="190" font-size="150" font-weight="800" letter-spacing="6" fill="url(#title)">BDF</text>
+  <text x="646" y="245" font-size="32" font-weight="600" fill="#f2dede">A fast, portable PDF reader</text>
+  <text x="646" y="287" font-size="21" fill="#c9a3a3">Windows · macOS · Linux · written in Rust · powered by PDFium</text>
+
+  <g font-size="19" font-weight="700" fill="#fff">
+    <rect x="646" y="318" width="118" height="42" rx="21" fill="#8b0000" stroke="#ff3b3b" stroke-opacity="0.6"/>
+    <text x="705" y="345" text-anchor="middle">Unzip</text>
+    <text x="784" y="346" fill="#ff3b3b" font-size="22">›</text>
+    <rect x="806" y="318" width="100" height="42" rx="21" fill="#8b0000" stroke="#ff3b3b" stroke-opacity="0.6"/>
+    <text x="856" y="345" text-anchor="middle">Run</text>
+    <text x="926" y="346" fill="#ff3b3b" font-size="22">›</text>
+    <rect x="948" y="318" width="108" height="42" rx="21" fill="#8b0000" stroke="#ff3b3b" stroke-opacity="0.6"/>
+    <text x="1002" y="345" text-anchor="middle">Read</text>
+  </g>
+  <text x="1080" y="345" font-size="17" fill="#c9a3a3">No installer. No admin.</text>
+</svg>

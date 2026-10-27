@@ -1,5 +1,5 @@
 // BDF's logo: the Mangekyou Sharingan of Kakashi (default) or Itachi, drawn
-// from the vector artwork in BOoDe007/Sharingan-Monitor (eyes/Kakashi-Obito.svg
+// from the vector artwork in boode-hub/Sharingan-Monitor (eyes/Kakashi-Obito.svg
 // and eyes/Itachi.svg; MIT licence), so the eyes match that app exactly. Shared
 // by the window and in-app images (theme.rs) and the Windows .exe icon
 // (build.rs).
