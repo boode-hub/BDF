@@ -115,6 +115,8 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() -> ExitCode {
     let launched = Instant::now();
+    #[cfg(bdf_embedded_pdfium)]
+    let _ = bdf_core::pdfium::EMBEDDED.set(include_bytes!(env!("BDF_EMBEDDED_PDFIUM")));
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {

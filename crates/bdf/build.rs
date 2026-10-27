@@ -1,4 +1,5 @@
-//! Embeds the icon and version information in the Windows executable.
+//! Embeds PDFium (when `.pdfium/` has it) and, on Windows, the icon and
+//! version information in the executable.
 
 // Only the default (Kakashi) icon is used here.
 #[allow(dead_code)]
@@ -7,7 +8,9 @@ mod icon_pixels;
 
 fn main() {
     println!("cargo:rerun-if-changed=src/icon_pixels.rs");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    embed_pdfium(&os);
+    if os != "windows" {
         return;
     }
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
@@ -26,6 +29,25 @@ fn main() {
     if let Err(e) = res.compile() {
         // A missing resource compiler must not break the build; the exe just has no icon.
         println!("cargo:warning=could not embed the icon: {e}");
+    }
+}
+
+/// Builds the PDFium library from `.pdfium/` (scripts/fetch_pdfium.sh) into
+/// the executable, so `bdf` runs on its own. Without it, PDFium must sit next
+/// to the executable as before.
+fn embed_pdfium(os: &str) {
+    println!("cargo::rustc-check-cfg=cfg(bdf_embedded_pdfium)");
+    let name = match os {
+        "windows" => "pdfium.dll",
+        "macos" => "libpdfium.dylib",
+        _ => "libpdfium.so",
+    };
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let lib = root.join("../../.pdfium").join(name);
+    println!("cargo:rerun-if-changed={}", lib.display());
+    if lib.exists() {
+        println!("cargo:rustc-cfg=bdf_embedded_pdfium");
+        println!("cargo:rustc-env=BDF_EMBEDDED_PDFIUM={}", lib.display());
     }
 }
 

@@ -27,6 +27,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // PDFium constants (public headers; stable across versions).
@@ -92,6 +93,30 @@ pub fn locate_library() -> Vec<PathBuf> {
     out
 }
 
+/// PDFium built into the executable (set by the app at start-up), so a lone
+/// `bdf.exe` still works. Used only when no library is found next to it.
+pub static EMBEDDED: OnceLock<&'static [u8]> = OnceLock::new();
+
+/// Writes the embedded PDFium into `dir` once and returns its path; later
+/// starts reuse the file. Each build gets its own folder, named by its size.
+// ponytail: size tells PDFium builds apart; hash the bytes if two builds ever share a size.
+fn extract_embedded(bytes: &[u8], dir: &Path) -> Option<PathBuf> {
+    let path = dir
+        .join(format!("pdfium-{}", bytes.len()))
+        .join(Pdfium::pdfium_platform_library_name());
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64) {
+        return Some(path);
+    }
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    // Write beside it, then rename, so a second BDF starting at the same time never loads half a file.
+    let part = path.with_extension(format!("{}.part", std::process::id()));
+    std::fs::write(&part, bytes).ok()?;
+    if std::fs::rename(&part, &path).is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    path.exists().then_some(path)
+}
+
 pub struct PdfiumEngine {
     lib: Box<dyn PdfiumLibraryBindings>,
     pub library_path: String,
@@ -124,6 +149,19 @@ impl PdfiumEngine {
             match Pdfium::bind_to_library(&path) {
                 Ok(lib) => return Ok(Self::with_bindings(lib, path.display().to_string())),
                 Err(e) => errors.push(format!("{}: {e:?}", path.display())),
+            }
+        }
+        if let Some(bytes) = EMBEDDED.get() {
+            let dir = crate::settings::DataDir::locate().path.join("engine");
+            match extract_embedded(bytes, &dir) {
+                Some(path) => match Pdfium::bind_to_library(&path) {
+                    Ok(lib) => return Ok(Self::with_bindings(lib, path.display().to_string())),
+                    Err(e) => errors.push(format!("{}: {e:?}", path.display())),
+                },
+                None => errors.push(format!(
+                    "could not write the built-in PDFium to {}",
+                    dir.display()
+                )),
             }
         }
         match Pdfium::bind_to_system_library() {
@@ -1829,6 +1867,26 @@ pub fn format_pdf_date(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_library_is_written_once() {
+        let dir = std::env::temp_dir().join(format!("bdf-embedded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = extract_embedded(b"not really pdfium", &dir).expect("written");
+        assert_eq!(std::fs::read(&path).unwrap(), b"not really pdfium");
+        let written = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(
+            extract_embedded(b"not really pdfium", &dir),
+            Some(path.clone())
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            written
+        );
+        // A different build goes into its own folder instead of over the file in use.
+        assert_ne!(extract_embedded(b"another build", &dir), Some(path));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn dates() {

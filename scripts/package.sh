@@ -11,7 +11,6 @@ out="$root/dist/$name"
 rm -rf "$out" && mkdir -p "$out"
 exe=bdf; [ -f "$target/bdf.exe" ] && exe=bdf.exe
 cp "$target/$exe" "$out/"
-cp "$root"/.pdfium/*pdfium* "$out/" 2>/dev/null || true
 mkdir -p "$out/licenses"
 cp "$root/.pdfium/PDFium-LICENSE.txt" "$out/licenses/"
 cp "$root/crates/bdf/assets/Phosphor-LICENSE-MIT.txt" "$out/licenses/"

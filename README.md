@@ -51,8 +51,7 @@ That's it. Open a PDF with **File > Open**, by dropping it on the window, or wit
 
 | What's in the folder | |
 | --- | --- |
-| `bdf.exe` | the reader |
-| `pdfium.dll` | the PDF engine; keep it next to `bdf.exe` |
+| `bdf.exe` | the reader, PDF engine built in; it even runs on its own |
 | `BDF-data/` | your settings, bookmarks and log, created on first run |
 | `licenses/`, `README.txt` | credits and a short how-to |
 
@@ -78,7 +77,7 @@ That's it. Open a PDF with **File > Open**, by dropping it on the window, or wit
 | --- | --- |
 | **Portable** | Unzip and run. Settings live in `BDF-data/` next to the program, so the whole reader travels on a USB stick or a network share. |
 | **Fast** | The page on screen is drawn first, the rest follows behind. On an ordinary office laptop the built-in benchmark opens a 2000-page file in under a second and scrolls it in under 4 ms a frame. |
-| **Light** | One small program plus PDFium. Idle CPU is zero: BDF only draws when something changes. |
+| **Light** | One file, PDF engine included. Idle CPU is zero: BDF only draws when something changes. |
 | **Accurate** | Pages are rendered by PDFium, the engine inside Chrome. |
 | **Safe** | Your markup is appended to the file, never rewritten over it, so digital signatures stay valid. The new file is verified before it replaces the old one. |
 
@@ -172,10 +171,11 @@ Needs Rust 1.88 or newer and the PDFium library.
 
 ```sh
 scripts/fetch_pdfium.sh win-x64      # or linux-x64, mac-arm64, mac-x64
-cargo build --release
-cp .pdfium/*pdfium* target/release/
+cargo build --release                # builds .pdfium/'s PDFium into the executable
 target/release/bdf some.pdf
 ```
+
+Without `.pdfium/` the build still works, but PDFium must then sit next to the executable.
 
 `scripts/package.sh win-x64` produces the portable zip in `dist/`.
 
