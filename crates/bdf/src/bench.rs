@@ -19,6 +19,10 @@ const IMAGE_WAIT: Duration = Duration::from_secs(15);
 /// Times the document is closed and reopened; memory growth from the second
 /// time to the last shows a leak.
 const REOPENS: u32 = 20;
+/// Extra documents opened at once, to measure the memory each tab costs.
+const EXTRA_TABS: usize = 8;
+/// Frames spent jumping around the 10,000 results with the list showing.
+const RESULT_JUMPS: u32 = 90;
 
 #[derive(Debug)]
 enum Phase {
@@ -30,10 +34,17 @@ enum Phase {
     Search(Instant),
     /// A one-letter search: more hits than the limit, so memory must stay flat.
     BroadSearch(Instant),
+    /// Jump between far-apart results with the results list on screen.
+    Results(u32),
     /// Close and reopen the document; `frames` counts frames since reopening.
     Reopen {
         cycle: u32,
         frames: u32,
+    },
+    /// Open more documents in tabs, then close them again.
+    Tabs {
+        frames: u32,
+        closing: bool,
     },
     Settle(u32),
     /// Idle CPU is measured on another thread, so the measurement itself
@@ -52,7 +63,9 @@ impl Phase {
             Phase::Split(_) => "split",
             Phase::Search(_) => "search",
             Phase::BroadSearch(_) => "broad_search",
+            Phase::Results(_) => "results",
             Phase::Reopen { .. } => "reopen",
+            Phase::Tabs { .. } => "tabs",
             Phase::Settle(_) => "settle",
             Phase::Idle(_) => "idle",
             Phase::Done => "done",
@@ -78,6 +91,10 @@ pub struct Bench {
     /// Memory after the second reopen, the baseline for spotting leaks.
     reopen_base_rss: Option<u64>,
     reopen_rss_growth_mb: Option<f64>,
+    results_frames: Vec<f32>,
+    tabs_base_rss: Option<u64>,
+    tabs_rss_growth_mb: Option<f64>,
+    tabs_leftover_mb: Option<f64>,
     idle_cpu_percent: Option<f64>,
     pages: usize,
     idle_frames: u32,
@@ -126,6 +143,10 @@ impl Bench {
             broad_search_hits: 0,
             reopen_base_rss: None,
             reopen_rss_growth_mb: None,
+            results_frames: Vec::new(),
+            tabs_base_rss: None,
+            tabs_rss_growth_mb: None,
+            tabs_leftover_mb: None,
             idle_cpu_percent: None,
             pages: 0,
             idle_frames: 0,
@@ -293,6 +314,8 @@ impl Bench {
                     self.search_hits = hits;
                     app.find.query = "e".into();
                     app.run_search();
+                    app.settings.sidebar = true;
+                    app.sidebar_tab = crate::app::SidebarTab::Search;
                     self.phase = Phase::BroadSearch(Instant::now());
                 }
             }
@@ -305,7 +328,31 @@ impl Bench {
                 if let Some((true, hits)) = done {
                     self.broad_search_ms = Some(ms(t0.elapsed()));
                     self.broad_search_hits = hits;
+                    self.phase = Phase::Results(0);
+                }
+            }
+            Phase::Results(n) => {
+                if n > 0 {
+                    self.results_frames.extend(last_frame);
+                }
+                // Far-apart results: the list and the page both have to follow.
+                let jump = app.active_tab().map(|t| t.doc).and_then(|doc| {
+                    let s = app.docs.get_mut(&doc)?.search.as_mut()?;
+                    let i = (n as usize * 997) % s.hits.len().max(1);
+                    s.current = Some(i);
+                    s.hits
+                        .get(i)
+                        .map(|h| (doc, h.page, h.rects.first().copied()))
+                });
+                if let Some((doc, page, rect)) = jump {
+                    app.jump_to_hit(doc, page, rect, false);
+                }
+                if n == RESULT_JUMPS / 2 {
+                    shot("5-results");
+                }
+                if n >= RESULT_JUMPS {
                     app.close_find();
+                    app.sidebar_tab = crate::app::SidebarTab::Thumbs;
                     if let Some(v) = app.active_view_mut() {
                         v.goto(0, false);
                     }
@@ -313,6 +360,8 @@ impl Bench {
                         cycle: 1,
                         frames: 0,
                     };
+                } else {
+                    self.phase = Phase::Results(n + 1);
                 }
             }
             Phase::Reopen { cycle, frames } => {
@@ -333,7 +382,10 @@ impl Bench {
                         self.reopen_rss_growth_mb = rss
                             .zip(self.reopen_base_rss)
                             .map(|(now, base)| (now as f64 - base as f64) / 1_048_576.0);
-                        self.phase = Phase::Settle(0);
+                        self.phase = Phase::Tabs {
+                            frames: 0,
+                            closing: false,
+                        };
                     } else {
                         self.phase = Phase::Reopen {
                             cycle: cycle + 1,
@@ -346,6 +398,52 @@ impl Bench {
                 self.phase = Phase::Reopen {
                     cycle,
                     frames: frames + 1,
+                };
+            }
+            Phase::Tabs { frames, closing } => {
+                let mb = |now: Option<u64>, base: Option<u64>| {
+                    now.zip(base)
+                        .map(|(n, b)| (n as f64 - b as f64) / 1_048_576.0)
+                };
+                let tab_file =
+                    |i: usize| std::env::temp_dir().join(format!("bdf-bench-tab-{i}.pdf"));
+                if frames == 0 && !closing {
+                    self.tabs_base_rss = crate::sysinfo::sample().rss_bytes;
+                    let bytes = bdf_core::testpdf::long_document(200);
+                    for i in 0..EXTRA_TABS {
+                        if std::fs::write(tab_file(i), &bytes).is_ok() {
+                            app.open_path(&tab_file(i), 0);
+                        }
+                    }
+                } else if frames > 5 && self.images_settled(app) {
+                    let rss = crate::sysinfo::sample().rss_bytes;
+                    if !closing && app.panes[0].tabs.len() > EXTRA_TABS {
+                        self.tabs_rss_growth_mb = mb(rss, self.tabs_base_rss);
+                        shot("6-tabs");
+                        while app.panes[0].tabs.len() > 1 {
+                            let last = app.panes[0].tabs.len() - 1;
+                            app.close_tab(0, last, true);
+                        }
+                        self.phase = Phase::Tabs {
+                            frames: 0,
+                            closing: true,
+                        };
+                        ctx.request_repaint();
+                        return true;
+                    }
+                    if closing && frames > 30 {
+                        self.tabs_leftover_mb = mb(rss, self.tabs_base_rss);
+                        for i in 0..EXTRA_TABS {
+                            let _ = std::fs::remove_file(tab_file(i));
+                        }
+                        self.phase = Phase::Settle(0);
+                        ctx.request_repaint();
+                        return true;
+                    }
+                }
+                self.phase = Phase::Tabs {
+                    frames: frames + 1,
+                    closing,
                 };
             }
             Phase::Settle(n) => {
@@ -444,6 +542,11 @@ impl Bench {
             "broad_search_hits": self.broad_search_hits,
             "reopen_cycles": REOPENS,
             "reopen_rss_growth_mb": self.reopen_rss_growth_mb,
+            "results_frame_ms_p95": pct(&self.results_frames, 0.95),
+            "results_frame_ms_max": pct(&self.results_frames, 1.0),
+            "extra_tabs": EXTRA_TABS,
+            "tabs_rss_growth_mb": self.tabs_rss_growth_mb,
+            "tabs_leftover_mb": self.tabs_leftover_mb,
             "idle_cpu_percent": self.idle_cpu_percent,
             "idle_frames": self.idle_frames,
             "rss_mb": stats.rss_bytes.map(|b| b as f64 / 1_048_576.0),

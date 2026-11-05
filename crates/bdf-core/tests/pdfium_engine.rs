@@ -30,8 +30,14 @@ fn serial() -> MutexGuard<'static, ()> {
     SERIAL.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// One folder for every run, emptied when a run starts, so test files never
+/// pile up in the temp folder.
 fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("bdf-engine-tests-{}", std::process::id()));
+    static FRESH: std::sync::Once = std::sync::Once::new();
+    let d = std::env::temp_dir().join("bdf-engine-tests");
+    FRESH.call_once(|| {
+        let _ = std::fs::remove_dir_all(&d);
+    });
     std::fs::create_dir_all(&d).unwrap();
     d.join(name)
 }
@@ -578,6 +584,72 @@ fn bad_input_never_panics() {
 }
 
 #[test]
+fn extreme_page_geometry_is_safe() {
+    let _serial = serial();
+    let Some(mut e) = engine() else { return };
+    // Huge, tiny, degenerate and oddly rotated pages: sizes stay sane, and
+    // every kind of image stays within a bounded size or fails cleanly.
+    let page = |w: f32, h: f32, rotate: i32| PageSpec {
+        size: (w, h),
+        rotate,
+        ..PageSpec::letter().with_text(10.0, 10.0, 12.0, "edge")
+    };
+    let spec = PdfSpec {
+        pages: vec![
+            page(1e30, 1e30, 0),
+            page(14400.0, 14400.0, 90),
+            page(0.01, 0.01, 0),
+            page(0.0, 0.0, 0),
+            page(-50.0, 100.0, 0),
+            page(612.0, 792.0, 37),
+            page(612.0, 792.0, -270),
+        ],
+        ..Default::default()
+    };
+    let path = write("extreme.pdf", &spec.build());
+    let info = e.open(DocId(1), &path, None).unwrap();
+    assert_eq!(info.page_sizes.len(), 7);
+    for (i, &(w, h)) in info.page_sizes.iter().enumerate() {
+        assert!(
+            w.is_finite() && h.is_finite() && w >= 1.0 && h >= 1.0 && w <= 14400.0 && h <= 14400.0,
+            "page {i}: {w} x {h}"
+        );
+    }
+    let max_scale = quantize_scale(64.0);
+    for p in 0..7 {
+        let _ = e.render(&thumb(DocId(1), p));
+        for (tx, ty) in [(0, 0), (1000, 1000), (u16::MAX, 3)] {
+            let k = TileKey {
+                kind: TileKind::Tile {
+                    scale: max_scale,
+                    tx,
+                    ty,
+                },
+                ..thumb(DocId(1), p)
+            };
+            if let Ok(img) = e.render(&k) {
+                assert!(img.rgba.len() <= 4 * 1024 * 1024 * 4, "tile too big");
+            }
+        }
+        let _ = e.render_region(&RegionReq {
+            doc: DocId(1),
+            page: p,
+            rotation: Rotation::R90,
+            invert: true,
+            scale: max_scale,
+            x: i32::MAX - 10,
+            y: -5,
+            w: 300,
+            h: 300,
+        });
+        if let Ok(d) = e.page_data(DocId(1), p) {
+            let _ = d.text.search("edge", Default::default());
+        }
+    }
+    e.close(DocId(1));
+}
+
+#[test]
 fn large_documents_open_fast_and_memory_stays_bounded() {
     let _serial = serial();
     let Some(mut e) = engine() else { return };
@@ -613,6 +685,8 @@ fn large_documents_open_fast_and_memory_stays_bounded() {
 
     let d = e.page_data(DocId(1), 1234).unwrap();
     assert!(d.text.all().contains("PAGE-1235"));
+    e.close(DocId(1));
+    let _ = std::fs::remove_file(&path); // 10 MB: do not leave it behind
     println!("open 2000 pages: {open_ms} ms; first tile: {render_ms} ms per page");
     // Generous limits for slow CI machines; typical numbers are far lower.
     assert!(open_ms < 3000, "open took {open_ms} ms");

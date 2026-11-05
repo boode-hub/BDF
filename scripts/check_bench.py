@@ -15,7 +15,12 @@ LIMITS = {
     "search_ms": 20000,         # search all 2000 pages
     "broad_search_ms": 20000,   # search for "e": stops at the hit limit
     "reopen_rss_growth_mb": 40, # memory added by reopening the document 18 more times: leaks
+    "results_frame_ms_p95": 60, # UI work per frame with 10,000 results listed and jumped through
+    "tabs_rss_growth_mb": 200,  # memory for 8 more 200-page documents open in tabs
+    "tabs_leftover_mb": 60,     # memory still held after closing those 8 tabs
 }
+# Memory readings are unavailable on macOS runners.
+RSS_KEYS = ("peak_rss_mb", "reopen_rss_growth_mb", "tabs_rss_growth_mb", "tabs_leftover_mb")
 
 SEARCH_HIT_LIMIT = 10_000       # bdf_core::worker::MAX_SEARCH_HITS
 
@@ -33,7 +38,7 @@ def main(path):
             limit *= 2
         v = r.get(key)
         if v is None:
-            if key in ("peak_rss_mb", "reopen_rss_growth_mb") and r.get("os") == "macos":
+            if key in RSS_KEYS and r.get("os") == "macos":
                 continue
             problems.append(f"{key}: missing")
         elif v > limit:

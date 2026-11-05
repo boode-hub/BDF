@@ -321,8 +321,10 @@ impl PdfiumEngine {
                 && s.height.is_finite()
                 && s.width > 0.0
                 && s.height > 0.0;
+            // PDF pages range from 1 to 14400 units a side; outside that a
+            // page would vanish or swamp the layout, so keep it in range.
             sizes.push(if good {
-                (s.width, s.height)
+                (s.width.clamp(1.0, 14400.0), s.height.clamp(1.0, 14400.0))
             } else {
                 (612.0, 792.0)
             });

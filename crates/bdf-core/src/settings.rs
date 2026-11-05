@@ -306,11 +306,27 @@ pub fn save_settings(file: &Path, s: &Settings) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    fn tmpdir(name: &str) -> PathBuf {
+    /// A fresh folder for one test, deleted when the test ends.
+    struct TmpDir(PathBuf);
+
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    impl std::ops::Deref for TmpDir {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    fn tmpdir(name: &str) -> TmpDir {
         let d = std::env::temp_dir().join(format!("bdf-settings-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        d
+        TmpDir(d)
     }
 
     #[test]

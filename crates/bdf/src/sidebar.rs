@@ -95,16 +95,13 @@ impl BdfApp {
             );
             self.thumbs_scrolled_to = Some((doc, current));
         }
-        let ids: Vec<(usize, (f32, f32), u32)> = (0..n)
-            .map(|p| (p, d.info.page_sizes[p], d.generation(p as u32)))
-            .collect();
-        let labels: Vec<Option<String>> = d.info.page_labels.clone();
         let dark_pages = self.settings.dark_pages;
         let tiles = &mut self.tiles;
         let ppp = ui.ctx().pixels_per_point();
+        // Only the visible rows are touched: nothing here grows with the page count.
         area.show_rows(ui, row_h, n, |ui, range| {
-            for p in range {
-                let (page, size, generation) = ids[p];
+            for page in range {
+                let (size, generation) = (d.info.page_sizes[page], d.generation(page as u32));
                 let (rect, resp) =
                     ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
                 // Rendered for the exact device pixels it covers, and placed on
@@ -187,7 +184,9 @@ impl BdfApp {
                         StrokeKind::Outside,
                     );
                 }
-                let label = labels
+                let label = d
+                    .info
+                    .page_labels
                     .get(page)
                     .cloned()
                     .flatten()
@@ -331,45 +330,87 @@ impl BdfApp {
         if d.annots.complete && ui.small_button("Refresh").clicked() {
             rescan = true;
         }
-        let items = d.annots.items.clone();
+        const ROW: f32 = 28.0;
+        const BADGE_W: f32 = 38.0;
+        let pal = theme::palette(ui.visuals().dark_mode);
+        let items = &d.annots.items;
         let mut nav = None;
+        // Only the visible rows are laid out, so thousands of annotations cost
+        // no more per frame than ten.
         egui::ScrollArea::vertical()
             .id_salt(("annots", doc.0))
             .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let mut last_page = None;
-                for (page, a) in &items {
-                    if last_page != Some(*page) {
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(format!("Page {}", page + 1))
-                                .weak()
-                                .size(12.0),
+            .show_rows(ui, ROW, items.len(), |ui, range| {
+                for i in range {
+                    let (page, a) = &items[i];
+                    let first_on_page = i == 0 || items[i - 1].0 != *page;
+                    let (rect, r) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+                    let p = ui.painter();
+                    if first_on_page && i > 0 {
+                        p.hline(
+                            rect.x_range(),
+                            rect.top(),
+                            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
                         );
-                        last_page = Some(*page);
+                    }
+                    let body = rect.shrink2(vec2(0.0, 2.0));
+                    if r.hovered() {
+                        p.rect_filled(
+                            body,
+                            CornerRadius::same(6),
+                            ui.visuals().widgets.hovered.weak_bg_fill,
+                        );
+                    }
+                    if first_on_page {
+                        let badge = egui::Rect::from_center_size(
+                            pos2(body.left() + 7.0 + (BADGE_W - 8.0) * 0.5, body.center().y),
+                            vec2(BADGE_W - 8.0, 18.0),
+                        );
+                        p.rect_filled(
+                            badge,
+                            CornerRadius::same(5),
+                            ui.visuals().widgets.inactive.bg_fill,
+                        );
+                        p.text(
+                            badge.center(),
+                            egui::Align2::CENTER_CENTER,
+                            (page + 1).to_string(),
+                            egui::FontId::proportional(11.5),
+                            ui.visuals().strong_text_color(),
+                        );
                     }
                     let color = a
                         .color
                         .map(|c| Color32::from_rgb(c[0], c[1], c[2]))
-                        .unwrap_or(Color32::GRAY);
+                        .unwrap_or(pal.muted);
+                    let dot = pos2(body.left() + BADGE_W + 8.0, body.center().y);
+                    p.circle_filled(dot, 4.5, color);
                     let text = if a.contents.is_empty() {
                         a.kind.label().to_string()
                     } else {
-                        format!("{}: {}", a.kind.label(), a.contents)
+                        format!("{}: {}", a.kind.label(), one_line(&a.contents, 80))
                     };
-                    let r = ui.add(
-                        egui::Button::new(
-                            RichText::new(format!("●  {}", one_line(&text, 60)))
-                                .color(ui.visuals().text_color()),
-                        )
-                        .min_size(vec2(ui.available_width(), 24.0)),
+                    let galley = ui.fonts_mut(|f| {
+                        let mut job = egui::text::LayoutJob::simple_singleline(
+                            text,
+                            egui::FontId::proportional(12.5),
+                            ui.visuals().text_color(),
+                        );
+                        job.wrap.max_width = body.right() - dot.x - 16.0;
+                        job.wrap.max_rows = 1;
+                        job.wrap.overflow_character = Some('…');
+                        f.layout_job(job)
+                    });
+                    p.galley(
+                        pos2(dot.x + 10.0, body.center().y - galley.size().y * 0.5),
+                        galley,
+                        ui.visuals().text_color(),
                     );
-                    ui.painter()
-                        .circle_filled(r.rect.left_center() + vec2(12.0, 0.0), 4.0, color);
-                    let r = if a.author.is_empty() {
+                    let r = if a.author.is_empty() && a.contents.is_empty() {
                         r
                     } else {
-                        r.on_hover_text(format!("{}\n{}", a.author, a.contents))
+                        r.on_hover_text(format!("{}\n{}", a.author, a.contents).trim().to_string())
                     };
                     if r.clicked() {
                         nav = Some(Nav::Jump(Jump {

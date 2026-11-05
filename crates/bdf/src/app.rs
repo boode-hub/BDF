@@ -2074,8 +2074,16 @@ impl eframe::App for BdfApp {
             self.last_title = title;
         }
         self.track_window(&ctx);
-        if self.settings_changed && self.last_settings_save.elapsed() > Duration::from_secs(10) {
-            self.save_settings_now();
+        if self.settings_changed {
+            const SAVE_EVERY: Duration = Duration::from_secs(10);
+            let since = self.last_settings_save.elapsed();
+            if since > SAVE_EVERY {
+                self.save_settings_now();
+            } else {
+                // Wake up to save even if nothing else happens (a bookmark
+                // added just before a power cut is not lost).
+                ctx.request_repaint_after(SAVE_EVERY - since);
+            }
         }
         let ms = t0.elapsed().as_secs_f32() * 1000.0;
         self.perf.frame_ms.push_back(ms);
