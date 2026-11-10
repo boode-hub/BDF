@@ -1375,6 +1375,43 @@ fn utf16_buffer(mut f: impl FnMut(*mut c_void, c_ulong) -> c_ulong) -> Option<St
     Some(s.trim_end_matches('\0').to_string())
 }
 
+/// The colour an annotation is drawn in, read from its appearance.
+///
+/// `FPDFAnnot_GetColor` refuses once an annotation has an appearance stream,
+/// and PDFium writes one for highlights, notes and shapes as soon as a page
+/// loads, so the list would show every annotation in grey. The first painted
+/// path tells instead: its fill (highlights, notes) or else its outline
+/// (shapes, ink, underlines).
+fn appearance_color(lib: &dyn PdfiumLibraryBindings, a: FPDF_ANNOTATION) -> Option<[u8; 3]> {
+    const PAGEOBJ_PATH: c_int = 2;
+    // SAFETY: valid annotation; objects are owned by it and only read.
+    let n = unsafe { lib.FPDFAnnot_GetObjectCount(a) }.clamp(0, 64);
+    for i in 0..n {
+        let obj = unsafe { lib.FPDFAnnot_GetObject(a, i) };
+        if obj.is_null() || unsafe { lib.FPDFPageObj_GetType(obj) } != PAGEOBJ_PATH {
+            continue;
+        }
+        let (mut fill, mut stroke) = (0 as c_int, 0 as c_int);
+        if unsafe { lib.FPDFPath_GetDrawMode(obj, &mut fill, &mut stroke) } == 0 {
+            continue;
+        }
+        let (mut r, mut g, mut b, mut al) = (0u32, 0u32, 0u32, 0u32);
+        let ok = unsafe {
+            if fill != 0 {
+                lib.FPDFPageObj_GetFillColor(obj, &mut r, &mut g, &mut b, &mut al)
+            } else if stroke != 0 {
+                lib.FPDFPageObj_GetStrokeColor(obj, &mut r, &mut g, &mut b, &mut al)
+            } else {
+                0
+            }
+        } != 0;
+        if ok && al > 0 {
+            return Some([r.min(255) as u8, g.min(255) as u8, b.min(255) as u8]);
+        }
+    }
+    None
+}
+
 fn annot_string(lib: &dyn PdfiumLibraryBindings, a: FPDF_ANNOTATION, key: &str) -> Option<String> {
     let n =
         // SAFETY: NULL buffer asks for the size.
@@ -1707,7 +1744,8 @@ fn read_annots(lib: &dyn PdfiumLibraryBindings, page: FPDF_PAGE) -> Vec<AnnotInf
             let color = (unsafe {
                 lib.FPDFAnnot_GetColor(a, COLORTYPE_COLOR as _, &mut cr, &mut cg, &mut cb, &mut ca)
             } != 0)
-                .then_some([cr.min(255) as u8, cg.min(255) as u8, cb.min(255) as u8]);
+                .then_some([cr.min(255) as u8, cg.min(255) as u8, cb.min(255) as u8])
+                .or_else(|| appearance_color(lib, a));
             if has_rect {
                 out.push(AnnotInfo {
                     index: i as usize,

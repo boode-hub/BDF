@@ -23,46 +23,49 @@ impl BdfApp {
             .size_range(150.0..=520.0)
             .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(6)))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (t, glyph, tip) in [
-                        (SidebarTab::Thumbs, icon::THUMBS, "Pages"),
-                        (SidebarTab::Outline, icon::OUTLINE, "Outline"),
-                        (SidebarTab::Bookmarks, icon::BOOKMARKS, "Bookmarks"),
-                        (SidebarTab::Annots, icon::COMMENT, "Annotations"),
-                        (SidebarTab::Search, icon::SEARCH, "Search results"),
-                    ] {
-                        let sel = self.sidebar_tab == t;
-                        if ui
-                            .selectable_label(sel, RichText::new(glyph).size(17.0))
-                            .on_hover_text(tip)
-                            .clicked()
-                        {
-                            self.sidebar_tab = t;
+                fixed_box(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        for (t, glyph, tip) in [
+                            (SidebarTab::Thumbs, icon::THUMBS, "Pages"),
+                            (SidebarTab::Outline, icon::OUTLINE, "Outline"),
+                            (SidebarTab::Bookmarks, icon::BOOKMARKS, "Bookmarks"),
+                            (SidebarTab::Annots, icon::COMMENT, "Annotations"),
+                            (SidebarTab::Search, icon::SEARCH, "Search results"),
+                        ] {
+                            let sel = self.sidebar_tab == t;
+                            if ui
+                                .selectable_label(sel, RichText::new(glyph).size(17.0))
+                                .on_hover_text(tip)
+                                .clicked()
+                            {
+                                self.sidebar_tab = t;
+                            }
+                        }
+                    });
+                    ui.separator();
+                    let Some(tab) = self.panes[self.active_pane].current() else {
+                        ui.weak("No document");
+                        return;
+                    };
+                    let doc = tab.doc;
+                    let current = tab.view.current_page;
+                    let nav = match self.sidebar_tab {
+                        SidebarTab::Thumbs => self.thumbs(ui, ctx, doc, current),
+                        SidebarTab::Outline => self.outline(ui, doc),
+                        SidebarTab::Bookmarks => self.bookmarks(ui, ctx, doc, current),
+                        SidebarTab::Annots => self.annot_list(ui, doc),
+                        SidebarTab::Search => self.search_list(ui, doc),
+                    };
+                    if let Some(n) = nav
+                        && let Some(t) = self.panes[self.active_pane].current_mut()
+                    {
+                        match n {
+                            Nav::Page(p) => t.view.goto(p, true),
+                            Nav::Jump(j) => t.view.jump(j, true),
                         }
                     }
-                });
-                ui.separator();
-                let Some(tab) = self.panes[self.active_pane].current() else {
-                    ui.weak("No document");
-                    return;
-                };
-                let doc = tab.doc;
-                let current = tab.view.current_page;
-                let nav = match self.sidebar_tab {
-                    SidebarTab::Thumbs => self.thumbs(ui, ctx, doc, current),
-                    SidebarTab::Outline => self.outline(ui, doc),
-                    SidebarTab::Bookmarks => self.bookmarks(ui, ctx, doc, current),
-                    SidebarTab::Annots => self.annot_list(ui, doc),
-                    SidebarTab::Search => self.search_list(ui, doc),
-                };
-                if let Some(n) = nav
-                    && let Some(t) = self.panes[self.active_pane].current_mut()
-                {
-                    match n {
-                        Nav::Page(p) => t.view.goto(p, true),
-                        Nav::Jump(j) => t.view.jump(j, true),
-                    }
-                }
+                })
             });
         let w = r.response.rect.width();
         if (w - self.settings.sidebar_width).abs() > 1.0 {
@@ -250,6 +253,10 @@ impl BdfApp {
             self.add_bookmark(ctx, doc, current as u32);
         }
         ui.add_space(4.0);
+        const ROW: f32 = 30.0;
+        const BADGE_W: f32 = 38.0;
+        const TRASH_W: f32 = 26.0;
+        let pal = theme::palette(ui.visuals().dark_mode);
         let mut nav = None;
         let mut remove = None;
         let mut changed = false;
@@ -262,41 +269,103 @@ impl BdfApp {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (i, b) in list.bookmarks.iter_mut().enumerate() {
-                    ui.horizontal(|ui| {
-                        let id = Id::unique(("bm-edit", doc.0, i));
-                        let editing = ui.data(|m| m.get_temp::<bool>(id)).unwrap_or(false);
-                        if editing {
-                            let r = ui.add(
-                                egui::TextEdit::singleline(&mut b.title)
-                                    .desired_width(ui.available_width() - 40.0),
-                            );
-                            r.request_focus();
-                            if r.lost_focus() {
-                                ui.data_mut(|m| m.insert_temp(id, false));
-                                changed = true;
+                    // Every row is exactly the list's width: badge, title, trash.
+                    let (rect, r) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+                    let body = rect.shrink2(vec2(0.0, 2.0));
+                    let trash = egui::Rect::from_min_max(
+                        pos2(body.right() - TRASH_W, body.top()),
+                        body.max,
+                    );
+                    let id = Id::unique(("bm-edit", doc.0, i));
+                    let editing = ui.data(|m| m.get_temp::<bool>(id)).unwrap_or(false);
+                    let here = b.page as usize == current;
+                    let p = ui.painter();
+                    if here {
+                        p.rect_filled(body, CornerRadius::same(6), pal.accent_soft);
+                    } else if r.hovered() {
+                        p.rect_filled(
+                            body,
+                            CornerRadius::same(6),
+                            ui.visuals().widgets.hovered.weak_bg_fill,
+                        );
+                    }
+                    let badge = egui::Rect::from_center_size(
+                        pos2(body.left() + 7.0 + (BADGE_W - 8.0) * 0.5, body.center().y),
+                        vec2(BADGE_W - 8.0, 18.0),
+                    );
+                    let (fill, ink) = if here {
+                        (pal.accent, Color32::WHITE)
+                    } else {
+                        (
+                            ui.visuals().widgets.inactive.bg_fill,
+                            ui.visuals().strong_text_color(),
+                        )
+                    };
+                    p.rect_filled(badge, CornerRadius::same(5), fill);
+                    p.text(
+                        badge.center(),
+                        egui::Align2::CENTER_CENTER,
+                        (b.page + 1).to_string(),
+                        egui::FontId::proportional(11.5),
+                        ink,
+                    );
+                    let title = egui::Rect::from_min_max(
+                        pos2(body.left() + BADGE_W + 4.0, body.top()),
+                        pos2(trash.left() - 4.0, body.bottom()),
+                    );
+                    if editing {
+                        let t = ui.put(
+                            title.shrink2(vec2(0.0, 2.0)),
+                            egui::TextEdit::singleline(&mut b.title),
+                        );
+                        t.request_focus();
+                        if t.lost_focus() {
+                            ui.data_mut(|m| m.insert_temp(id, false));
+                            // An empty name would leave a blank row to click.
+                            if b.title.trim().is_empty() {
+                                b.title = format!("Page {}", b.page + 1);
                             }
-                        } else {
-                            let r = ui.add(
-                                egui::Button::new(format!("{}  {}", icon::BOOKMARK, b.title))
-                                    .right_text(RichText::new((b.page + 1).to_string()).weak())
-                                    .min_size(vec2(ui.available_width() - 30.0, 24.0)),
-                            );
-                            if r.clicked() {
-                                nav = Some(Nav::Page(b.page as usize));
-                            }
-                            if r.double_clicked() {
-                                ui.data_mut(|m| m.insert_temp(id, true));
-                            }
-                            r.on_hover_text("Click to go there, double-click to rename");
+                            changed = true;
                         }
-                        if ui
-                            .small_button(icon::TRASH)
-                            .on_hover_text("Remove")
-                            .clicked()
-                        {
-                            remove = Some(i);
+                    } else {
+                        let galley = ui.fonts_mut(|f| {
+                            let mut job = egui::text::LayoutJob::simple_singleline(
+                                b.title.clone(),
+                                egui::FontId::proportional(12.5),
+                                ui.visuals().text_color(),
+                            );
+                            job.wrap.max_width = title.width().max(0.0);
+                            job.wrap.max_rows = 1;
+                            job.wrap.overflow_character = Some('…');
+                            f.layout_job(job)
+                        });
+                        p.galley(
+                            pos2(title.left(), title.center().y - galley.size().y * 0.5),
+                            galley,
+                            ui.visuals().text_color(),
+                        );
+                    }
+                    let t = ui
+                        .put(
+                            trash,
+                            egui::Button::new(RichText::new(icon::TRASH).size(13.0)).frame(false),
+                        )
+                        .on_hover_text("Remove");
+                    if t.clicked() {
+                        remove = Some(i);
+                    } else if !editing {
+                        if r.clicked() {
+                            nav = Some(Nav::Page(b.page as usize));
                         }
-                    });
+                        if r.double_clicked() {
+                            ui.data_mut(|m| m.insert_temp(id, true));
+                        }
+                        r.on_hover_text(format!(
+                            "{}\nClick to go there, double-click to rename",
+                            b.title
+                        ));
+                    }
                 }
             });
         if let Some(i) = remove {
@@ -575,6 +644,27 @@ impl BdfApp {
     }
 }
 
+/// Lays out `add` in exactly the space `ui` has left, clipping what does not
+/// fit.
+///
+/// egui sizes a panel to what its content used, so a row one pixel too wide
+/// widens the panel, which widens the row, every frame: the sidebar crept
+/// open by itself and the page beside it re-fitted back and forth. Inside
+/// this box content can be clipped, but never push the panel out.
+fn fixed_box<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let area = ui.available_rect_before_wrap();
+    // Claim the space without a widget: an invisible one over the whole
+    // panel would sit in the way of the resize handle.
+    ui.advance_cursor_after_rect(area);
+    let mut inner = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(area)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    inner.shrink_clip_rect(area);
+    add(&mut inner)
+}
+
 /// Two lines of excerpt with the match highlighted, starting shortly before
 /// the match so it is always in view.
 fn snippet_job(
@@ -686,5 +776,165 @@ fn outline_item(
                     outline_item(ui, c, id.with(i), depth + 1, nav, uri);
                 }
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Width of a resizable left panel holding a row 40 px too wide, after
+    /// `frames` frames.
+    fn panel_width(frames: usize, boxed: bool) -> f32 {
+        let ctx = Context::default();
+        let mut width = 0.0;
+        for _ in 0..frames {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    pos2(0.0, 0.0),
+                    vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let r = egui::Panel::left("p")
+                    .resizable(true)
+                    .default_size(220.0)
+                    .size_range(150.0..=520.0)
+                    .show(ui, |ui| {
+                        let row = |ui: &mut Ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    vec2(ui.available_width() + 40.0, 20.0),
+                                    egui::Label::new("x"),
+                                );
+                            });
+                        };
+                        if boxed {
+                            fixed_box(ui, row);
+                        } else {
+                            row(ui);
+                        }
+                    });
+                width = r.response.rect.width();
+            });
+        }
+        width
+    }
+
+    #[test]
+    fn content_cannot_widen_the_sidebar() {
+        // Without the box the panel creeps open frame after frame (the bug).
+        assert!(panel_width(60, false) > panel_width(2, false) + 100.0);
+        // With it, the width holds.
+        assert_eq!(panel_width(60, true), panel_width(2, true));
+    }
+
+    /// What the sidebar can hold: a short message (an empty tab), a long
+    /// scrolling list, a row that is too wide.
+    #[derive(Clone, Copy, Debug)]
+    enum Content {
+        Message,
+        List,
+        TooWide,
+    }
+
+    /// Drags the panel's edge (at 220 px) along `path` with the mouse held
+    /// down at height `y`, then lets go and waits; returns the panel width
+    /// after every frame.
+    fn drag_edge(content: Content, y: f32, path: &[f32]) -> Vec<f32> {
+        use egui::{Event, Modifiers, PointerButton};
+        let ctx = Context::default();
+        let mut frames: Vec<Vec<Event>> = vec![vec![]; 3];
+        let start = pos2(218.0, y);
+        frames.push(vec![Event::PointerMoved(start)]);
+        frames.push(vec![Event::PointerButton {
+            pos: start,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        for &x in path {
+            frames.push(vec![Event::PointerMoved(pos2(x, y))]);
+        }
+        let end = pos2(*path.last().unwrap(), y);
+        frames.push(vec![Event::PointerButton {
+            pos: end,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        frames.extend(vec![vec![]; 30]);
+        let mut widths = Vec::new();
+        for (i, events) in frames.into_iter().enumerate() {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    pos2(0.0, 0.0),
+                    vec2(1200.0, 800.0),
+                )),
+                time: Some(i as f64 / 60.0),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let r = egui::Panel::left("p")
+                    .resizable(true)
+                    .default_size(220.0)
+                    .size_range(150.0..=520.0)
+                    .show(ui, |ui| {
+                        fixed_box(ui, |ui| match content {
+                            Content::Message => {
+                                ui.weak("Press Ctrl+F to search this document.");
+                            }
+                            Content::List => {
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false, false])
+                                    .show_rows(ui, 30.0, 500, |ui, range| {
+                                        for i in range {
+                                            let _ = ui.allocate_exact_size(
+                                                vec2(ui.available_width(), 30.0),
+                                                Sense::click(),
+                                            );
+                                            let _ = i;
+                                        }
+                                    });
+                            }
+                            Content::TooWide => {
+                                ui.horizontal(|ui| {
+                                    ui.add_sized(
+                                        vec2(ui.available_width() + 40.0, 20.0),
+                                        egui::Label::new("x"),
+                                    );
+                                });
+                            }
+                        });
+                    });
+                widths.push(r.response.rect.width());
+            });
+        }
+        widths
+    }
+
+    #[test]
+    fn the_sidebar_resizes_with_any_content_and_then_stays() {
+        let out: Vec<f32> = (0..=18).map(|i| 218.0 + i as f32 * 10.0).collect();
+        let back: Vec<f32> = (0..=20).map(|i| 218.0 - i as f32 * 10.0).collect();
+        for content in [Content::Message, Content::List, Content::TooWide] {
+            for y in [60.0, 400.0, 750.0] {
+                for (path, want) in [(&out, 398.0), (&back, 150.0)] {
+                    let w = drag_edge(content, y, path);
+                    let last = &w[w.len() - 30..];
+                    assert!(
+                        (last[0] - want).abs() <= 3.0,
+                        "{content:?} at y={y}: ended at {} instead of {want}",
+                        last[0]
+                    );
+                    assert!(
+                        last.iter().all(|&x| x == last[0]),
+                        "{content:?} at y={y}: kept moving after release: {last:?}"
+                    );
+                }
+            }
+        }
     }
 }

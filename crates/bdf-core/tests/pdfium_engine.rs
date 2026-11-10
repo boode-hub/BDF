@@ -404,20 +404,29 @@ fn annotations_round_trip_through_an_in_place_save() {
         .expect("highlight listed");
     assert_eq!(hl.kind, AnnotKind::Highlight);
     assert_eq!(hl.contents, "important");
-    // PDFium only reports /C while an annotation has no appearance stream.
-    assert!(hl.color.is_none() || hl.color == Some([255, 0, 0]));
-    assert!(
-        d.annots
-            .iter()
-            .any(|a| a.name.as_deref() == Some(&note) && a.kind == AnnotKind::Note)
-    );
+    // Colours come back even though PDFium has given each an appearance
+    // stream (the annotations list shows them).
+    assert_eq!(hl.color, Some([255, 0, 0]));
+    let n = d
+        .annots
+        .iter()
+        .find(|a| a.name.as_deref() == Some(&note) && a.kind == AnnotKind::Note)
+        .expect("note listed");
+    // PDFium paints its note icon in a fixed yellow; the list shows what is drawn.
+    assert!(n.color.is_some());
     let d1 = e.page_data(doc, 1).unwrap();
-    assert!(
-        d1.annots
-            .iter()
-            .any(|a| a.name.as_deref() == Some(&ink) && a.kind == AnnotKind::Ink)
-    );
-    assert!(d1.annots.iter().any(|a| a.kind == AnnotKind::Square));
+    let i = d1
+        .annots
+        .iter()
+        .find(|a| a.name.as_deref() == Some(&ink) && a.kind == AnnotKind::Ink)
+        .expect("ink listed");
+    assert_eq!(i.color, Some([0, 0, 255]));
+    let sq = d1
+        .annots
+        .iter()
+        .find(|a| a.kind == AnnotKind::Square)
+        .expect("square listed");
+    assert_eq!(sq.color, Some([0, 128, 0]));
 
     e.set_annot_contents(doc, 0, 0, Some(&note), "edited note")
         .unwrap();
