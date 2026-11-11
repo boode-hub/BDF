@@ -10,6 +10,14 @@ pdfium-render.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
+# Updates: verify the release signature and checksum, unpack the program.
+ed25519-dalek = { version = "3", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+zip = { version = "9.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Tests sign fake releases; BDF itself only verifies.
+ed25519-dalek = { version = "3", default-features = false, features = ["signature"] }

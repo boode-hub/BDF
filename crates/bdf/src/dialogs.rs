@@ -545,6 +545,148 @@ impl BdfApp {
                     });
                 });
             }
+            Dialog::Update(u) => {
+                use crate::updater::State;
+                let state = u.state();
+                let busy = matches!(
+                    state,
+                    State::Checking | State::Downloading { .. } | State::Testing(_)
+                );
+                let dirty = self.docs.values().any(|d| d.dirty);
+                let mut install = None;
+                let mut restart = false;
+                let mut page = None;
+                modal.show(ctx, |ui| {
+                    ui.set_width(460.0);
+                    let pal = theme::palette(ui.visuals().dark_mode);
+                    let mb = |b: u64| b as f64 / 1_048_576.0;
+                    match &state {
+                        State::Checking => {
+                            ui.heading("Checking for updates");
+                            ui.horizontal(|ui| {
+                                theme::spinner(ui, 16.0);
+                                ui.label("Asking GitHub for the latest version…");
+                            });
+                        }
+                        State::UpToDate(v) => {
+                            ui.heading(format!("{}  BDF is up to date", icon::CHECK));
+                            ui.label(format!("You have the latest version, {v}."));
+                        }
+                        State::Available(r) => {
+                            ui.heading(format!("{}  BDF {} is available", icon::INFO, r.version));
+                            let size = bdf_core::update::platform()
+                                .and_then(|p| r.zip_for(p))
+                                .map(|a| format!(" The download is {:.1} MB.", mb(a.size)))
+                                .unwrap_or_default();
+                            ui.label(format!("You have {}.{size}", bdf_core::update::Version::current()));
+                            if !r.notes.trim().is_empty() {
+                                ui.add_space(4.0);
+                                egui::Frame::group(ui.style()).show(ui, |ui| {
+                                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                                        ui.set_width(ui.available_width());
+                                        ui.add(egui::Label::new(r.notes.trim()).wrap());
+                                    });
+                                });
+                            }
+                            ui.add_space(4.0);
+                            ui.weak(
+                                "BDF checks that the download is signed by its author and \
+                                 unchanged, and tries the new version before it replaces this one.",
+                            );
+                        }
+                        State::NoBuild(r) => {
+                            ui.heading(format!("{}  BDF {} is available", icon::INFO, r.version));
+                            ui.label("There is no ready-made download for this computer; see the release page.");
+                        }
+                        State::Downloading { version, done, total } => {
+                            ui.heading(format!("Downloading BDF {version}"));
+                            let f = if *total > 0 { *done as f32 / *total as f32 } else { 0.0 };
+                            ui.add(egui::ProgressBar::new(f.clamp(0.0, 1.0)).text(if *total > 0 {
+                                format!("{:.1} of {:.1} MB", mb(*done), mb(*total))
+                            } else {
+                                "Checking the release signature…".into()
+                            }));
+                        }
+                        State::Testing(v) => {
+                            ui.heading(format!("Installing BDF {v}"));
+                            ui.horizontal(|ui| {
+                                theme::spinner(ui, 16.0);
+                                ui.label("Verified. Trying the new version before it replaces this one…");
+                            });
+                        }
+                        State::Installed(v) => {
+                            ui.heading(format!("{}  BDF {v} is installed", icon::CHECK));
+                            ui.label("It starts the next time BDF opens. Your settings and bookmarks stay as they are.");
+                            if dirty {
+                                ui.colored_label(pal.accent, "Save your changes first, then restart BDF.");
+                            }
+                        }
+                        State::Failed(e) => {
+                            ui.heading(format!("{}  The update did not go through", icon::WARNING));
+                            ui.add(egui::Label::new(e.as_str()).wrap());
+                            ui.add_space(4.0);
+                            ui.weak("This version of BDF is unchanged.");
+                        }
+                    }
+                    buttons(ui, |ui| match &state {
+                        State::Available(r) => {
+                            if primary(ui, "Download and install") {
+                                install = Some(r.clone());
+                            }
+                            if secondary(ui, "Not now") {
+                                outcome = Outcome::Close;
+                            }
+                            if secondary(ui, "Release notes") {
+                                page = Some(r.page.clone());
+                            }
+                        }
+                        State::Installed(_) => {
+                            if !dirty && primary(ui, "Restart now") {
+                                restart = true;
+                            }
+                            if secondary(ui, "Later") {
+                                outcome = Outcome::Close;
+                            }
+                        }
+                        State::NoBuild(r) => {
+                            if primary(ui, "Release page") {
+                                page = Some(r.page.clone());
+                            }
+                            if secondary(ui, "Close") {
+                                outcome = Outcome::Close;
+                            }
+                        }
+                        State::Failed(_) => {
+                            if secondary(ui, "Close") {
+                                outcome = Outcome::Close;
+                            }
+                            if secondary(ui, "Release page") {
+                                page = Some(bdf_core::update::RELEASES_PAGE.to_string());
+                            }
+                        }
+                        State::UpToDate(_) => {
+                            if primary(ui, "Close") {
+                                outcome = Outcome::Close;
+                            }
+                        }
+                        // Short, and must not be interrupted half way.
+                        State::Checking | State::Downloading { .. } | State::Testing(_) => {}
+                    });
+                });
+                if let Some(r) = install {
+                    u.install(ctx, r);
+                }
+                if let Some(p) = page {
+                    ctx.open_url(egui::OpenUrl::new_tab(p));
+                }
+                if restart {
+                    self.restart(ctx);
+                    outcome = Outcome::Close;
+                }
+                if esc && !busy {
+                    outcome = Outcome::Close;
+                }
+            }
             Dialog::About => {
                 modal.show(ctx, |ui| {
                     ui.set_width(420.0);

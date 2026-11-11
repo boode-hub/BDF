@@ -124,6 +124,33 @@ jobs:
           mkdir -p upload && find artifacts -name 'BDF-*.zip' -exec cp {} upload/ \;
           ls upload/*.zip
           (cd upload && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - uses: actions/checkout@v5
+        with:
+          path: src
+          sparse-checkout: crates/bdf-core/src/update.rs
+          sparse-checkout-cone-mode: false
+      - name: Sign the checksums
+        # BDF's "Check for updates" installs nothing that is not signed with
+        # this key; the public half is built into the program (update.rs).
+        env:
+          BDF_SIGNING_KEY: ${{ secrets.BDF_SIGNING_KEY }}
+        run: |
+          if [ -z "$BDF_SIGNING_KEY" ]; then
+            echo "::error::The BDF_SIGNING_KEY secret is missing: releases must be signed"; exit 1
+          fi
+          umask 077
+          printf '%s\n' "$BDF_SIGNING_KEY" > key.pem
+          trap 'rm -f key.pem pub.pem' EXIT
+          openssl pkey -in key.pem -pubout -out pub.pem
+          have="$(openssl pkey -pubin -in pub.pem -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')"
+          want="$(grep -o 'PUBLIC_KEY_HEX: &str = "[0-9a-f]*"' src/crates/bdf-core/src/update.rs | cut -d'"' -f2)"
+          if [ "$have" != "$want" ]; then
+            echo "::error::The signing key does not match the public key built into BDF"; exit 1
+          fi
+          openssl pkeyutl -sign -inkey key.pem -rawin -in upload/SHA256SUMS.txt -out upload/SHA256SUMS.txt.sig
+          openssl pkeyutl -verify -pubin -inkey pub.pem -rawin \
+            -in upload/SHA256SUMS.txt -sigfile upload/SHA256SUMS.txt.sig
+          ls -l upload
       - uses: softprops/action-gh-release@v2
         with:
           files: upload/*

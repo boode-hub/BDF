@@ -8,6 +8,7 @@
 //! * [`cache`]: the byte-bounded LRU used for page images.
 //! * [`settings`]: portable settings and per-document memory.
 //! * [`testpdf`]: a small PDF writer for tests and benchmarks.
+//! * [`update`]: signed updates from GitHub releases.
 
 pub mod cache;
 pub mod engine;
@@ -17,5 +18,6 @@ pub mod pdfium;
 pub mod settings;
 pub mod testpdf;
 pub mod text;
+pub mod update;
 pub mod visual;
 pub mod worker;

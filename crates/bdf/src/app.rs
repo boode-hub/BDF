@@ -89,6 +89,7 @@ pub enum Dialog {
     Settings,
     Shortcuts,
     About,
+    Update(crate::updater::Updater),
     Error {
         title: String,
         text: String,
@@ -239,6 +240,10 @@ impl BdfApp {
                 (None, Some(e))
             }
         };
+        if worker.is_some() {
+            // This version started properly: what an update left can go.
+            crate::updater::clean_up_after_update();
+        }
         let (jobs_tx, jobs_rx) = mpsc::channel();
         let budget = settings.cache_mib as usize * 1024 * 1024;
         let mut app = Self {
@@ -427,6 +432,41 @@ impl BdfApp {
     /// Closes without prompting (benchmark, after "Discard").
     pub fn force_close(&mut self, _ctx: &Context) {
         self.allow_close = true;
+    }
+
+    /// Starts the program again (after an update) with the open documents,
+    /// then closes this window. Settings are saved first, so the new start
+    /// sees them.
+    pub fn restart(&mut self, ctx: &Context) {
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        for t in self.panes.iter().flat_map(|p| p.tabs.iter()) {
+            if let Some(d) = self.docs.get(&t.doc)
+                && !files.contains(&d.path)
+            {
+                files.push(d.path.clone());
+            }
+        }
+        self.save_settings_now();
+        self.wait_for_settings_save();
+        let started = crate::updater::program()
+            .ok_or_else(|| "its program file is unknown".to_string())
+            .and_then(|exe| {
+                std::process::Command::new(exe)
+                    .args(&files)
+                    .spawn()
+                    .map_err(|e| e.to_string())
+            });
+        match started {
+            Ok(_) => {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
+            Err(e) => self.toast(
+                ctx,
+                format!("BDF could not restart ({e}); open it again to use the new version"),
+                true,
+            ),
+        }
     }
 
     pub fn opening(&self) -> usize {

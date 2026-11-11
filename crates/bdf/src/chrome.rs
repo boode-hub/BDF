@@ -456,6 +456,15 @@ impl BdfApp {
             ) {
                 self.show_dialog(Dialog::Shortcuts);
             }
+            if menu_item(
+                ui,
+                &format!("{}  Check for updates…", icon::RECENT),
+                "",
+                true,
+            ) {
+                let u = crate::updater::Updater::check(ctx);
+                self.show_dialog(Dialog::Update(u));
+            }
             if menu_item(ui, &format!("{}  About BDF", icon::INFO), "", true) {
                 self.show_dialog(Dialog::About);
             }

@@ -12,6 +12,12 @@ put pdfium.dll (libpdfium.so / libpdfium.dylib) next to the program.
 Open files with File > Open, by dropping them on the window, or with
 "Open with" in your file manager. Help > Keyboard shortcuts lists them all.
 
+To update, choose Help > Check for updates (BDF only goes online when you
+ask). A new version is installed only if it is signed with BDF's key, matches
+its checksum and passes a self-test; the previous program is kept as
+bdf.old.exe (bdf.old) until the new one has started. To go back by hand,
+delete bdf.exe and rename bdf.old.exe to bdf.exe.
+
 If the window does not appear on an old or virtual machine, start BDF with
   bdf --renderer wgpu
 or choose Graphics in Preferences.

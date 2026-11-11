@@ -57,6 +57,17 @@ That's it. Open a PDF with **File > Open**, by dropping it on the window, or wit
 
 **To uninstall,** delete the folder. Nothing else was ever touched.
 
+**To update,** choose **Help > Check for updates**. BDF never goes online by
+itself; only when you ask. It installs a new version only if:
+
+- the release is **signed** with BDF's own key (built into the program);
+- the download matches its signed **checksum**;
+- the new program passes a **self-test**: it loads its PDF engine and draws a page.
+
+Then it swaps the program file and keeps the old one as `bdf.old.exe` until
+the new version has started. Your settings and bookmarks stay where they are.
+If anything fails, nothing changes.
+
 > [!NOTE]
 > **Old PC or virtual machine and no window appears?** Start it with
 > `bdf --renderer wgpu`, or choose **Graphics** in **Preferences**. BDF also
@@ -139,6 +150,9 @@ bdf --bench [file] [--report path]   # scripted benchmark of the real app
 bdf --generate N out.pdf             # an N-page test PDF
 bdf --generate-form out.pdf          # a one-page test form
 bdf --list-annotations file.pdf      # what PDFium sees, one line per annotation
+bdf --check-update                   # the latest version on GitHub (installs nothing)
+bdf --install-update                 # download, verify and install it
+bdf --self-test                      # load the engine, open and draw a test page
 ```
 
 <p align="center"><img src="docs/divider.png" width="900" alt=""></p>
@@ -220,6 +234,7 @@ crates/bdf-core   document engine, no UI; fully unit tested
   visual.rs       selection by visible lines and columns (smart highlighting)
   cache.rs        byte-bounded LRU for page images
   settings.rs     portable settings, per-document memory
+  update.rs       signed updates: signature, checksum, unpack, safe swap
   testpdf.rs      tiny PDF writer for tests and benchmarks
 crates/bdf        the application (egui)
   view.rs         one document view: scrolling, zoom, tiles, tools
@@ -227,6 +242,7 @@ crates/bdf        the application (egui)
   chrome.rs       menus, toolbar, tab strip, status bar, find bar
   sidebar.rs      thumbnails, outline, bookmarks, annotations, results
   dialogs.rs      modal dialogs
+  updater.rs      Help > Check for updates (the only network code)
   print.rs        Windows GDI printing; CUPS on macOS/Linux
   bench.rs        `bdf --bench` scripted benchmark
 ```

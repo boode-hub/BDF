@@ -15,6 +15,7 @@ mod sidebar;
 mod sysinfo;
 mod theme;
 mod tiles;
+mod updater;
 mod view;
 
 use bdf_core::settings::{DataDir, RendererPref};
@@ -38,6 +39,9 @@ Options:
                          Write a one-page test form and exit
       --list-annotations file
                          Print the annotations PDFium sees in a file and exit
+      --check-update     Ask GitHub for the latest version (installs nothing)
+      --install-update   Download, verify and install the latest version
+      --self-test        Load the PDF engine, open and draw a test page, and exit
   -h, --help             Show this help
   -V, --version          Show the version
 ";
@@ -52,6 +56,9 @@ struct Args {
     generate: Option<(usize, PathBuf)>,
     list_annotations: Option<PathBuf>,
     generate_form: Option<PathBuf>,
+    check_update: bool,
+    install_update: bool,
+    self_test: bool,
     help: bool,
     version: bool,
 }
@@ -64,6 +71,9 @@ fn parse_args() -> Result<Args, String> {
         match s.as_str() {
             "-h" | "--help" => a.help = true,
             "-V" | "--version" => a.version = true,
+            "--check-update" => a.check_update = true,
+            "--install-update" => a.install_update = true,
+            "--self-test" => a.self_test = true,
             "-p" | "--page" => {
                 let n = it.next().ok_or("--page needs a number")?;
                 a.page = Some(
@@ -115,6 +125,7 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() -> ExitCode {
     let launched = Instant::now();
+    updater::remember_program();
     #[cfg(bdf_embedded_pdfium)]
     let _ = bdf_core::pdfium::EMBEDDED.set(include_bytes!(env!("BDF_EMBEDDED_PDFIUM")));
     let args = match parse_args() {
@@ -131,6 +142,9 @@ fn main() -> ExitCode {
         || args.bench.is_some()
         || args.list_annotations.is_some()
         || args.generate_form.is_some()
+        || args.check_update
+        || args.install_update
+        || args.self_test
     {
         platform::attach_console();
     }
@@ -163,6 +177,24 @@ fn main() -> ExitCode {
     }
     if let Some(path) = &args.list_annotations {
         return list_annotations(path);
+    }
+    if args.self_test {
+        return self_test();
+    }
+    if args.check_update {
+        return check_update();
+    }
+    if args.install_update {
+        return match updater::install_from_command_line() {
+            Ok(done) => {
+                println!("{done}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("bdf: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
 
     let data = DataDir::locate();
@@ -322,6 +354,76 @@ fn list_annotations(path: &std::path::Path) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+/// `--self-test`: what a downloaded update must pass before it replaces
+/// this program. Prints `BDF <version> self-test ok` on success.
+fn self_test() -> ExitCode {
+    use bdf_core::engine::{DocId, Engine, TileKey, TileKind};
+    let run = || -> Result<(), String> {
+        let mut engine = bdf_core::pdfium::PdfiumEngine::load()?;
+        let path = std::env::temp_dir().join(format!("bdf-self-test-{}.pdf", std::process::id()));
+        std::fs::write(&path, bdf_core::testpdf::long_document(2)).map_err(|e| e.to_string())?;
+        let doc = DocId(1);
+        let result = (|| {
+            engine.open(doc, &path, None).map_err(|e| e.to_string())?;
+            let thumb = TileKey {
+                doc,
+                page: 0,
+                rotation: Default::default(),
+                invert: false,
+                generation: 0,
+                kind: TileKind::Thumb,
+            };
+            let img = engine.render(&thumb)?;
+            if img.width == 0 || img.rgba.iter().all(|&b| b == 255) {
+                return Err("the test page rendered blank".to_string());
+            }
+            let text = engine.page_data(doc, 0)?.text.all();
+            if !text.contains("PAGE-1") {
+                return Err("the test page's text was not found".into());
+            }
+            engine.close(doc);
+            Ok(())
+        })();
+        let _ = std::fs::remove_file(&path);
+        result
+    };
+    match run() {
+        Ok(()) => {
+            println!("BDF {} self-test ok", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("bdf: self-test failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `--check-update`: the version on GitHub, compared with this one.
+fn check_update() -> ExitCode {
+    let current = bdf_core::update::Version::current();
+    match updater::latest() {
+        Ok(r) if r.version > current => {
+            println!(
+                "BDF {} is available (this is {current}): {}",
+                r.version, r.page
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(r) => {
+            println!(
+                "BDF {current} is up to date (latest release: {})",
+                r.version
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("bdf: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]
