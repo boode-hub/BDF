@@ -227,6 +227,9 @@ pub fn unpack_program(zip: &[u8], expected: &[u8; 32]) -> Result<Vec<u8>, String
     f.take(MAX_PROGRAM + 1)
         .read_to_end(&mut out)
         .map_err(|e| format!("the zip is damaged ({e})"))?;
+    if out.len() as u64 > MAX_PROGRAM {
+        return Err("the program in the zip is implausibly large".into());
+    }
     if !looks_like_a_program(&out) {
         return Err(format!(
             "{name} in the zip is not a program for this computer"

@@ -2136,6 +2136,7 @@ impl eframe::App for BdfApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_settings_now();
         self.wait_for_settings_save();
+        crate::updater::wait_for_install();
         log::info!("exiting");
     }
 }

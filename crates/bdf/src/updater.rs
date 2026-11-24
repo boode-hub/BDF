@@ -6,6 +6,7 @@ use bdf_core::update::{self, Asset, Release, Version};
 use eframe::egui::Context;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -60,10 +61,27 @@ impl Updater {
     }
 
     /// Downloads, verifies and installs `release` next to the running program.
+    /// Only one install runs at a time; a second request (a double click) is
+    /// ignored.
     pub fn install(&self, ctx: &Context, release: Release) {
+        if INSTALLING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        let v = release.version;
+        // Leave "available" at once, so the button is gone from the next frame.
+        self.set(
+            ctx,
+            State::Downloading {
+                version: v,
+                done: 0,
+                total: 0,
+            },
+        );
         let (me, ctx) = (self.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let v = release.version;
             let result = (|| {
                 let exe = current_exe()?;
                 let plat = update::platform().ok_or("there are no downloads for this computer")?;
@@ -82,18 +100,11 @@ impl Updater {
                         }
                     })
                 };
-                me.set(
-                    &ctx,
-                    State::Downloading {
-                        version: v,
-                        done: 0,
-                        total: 0,
-                    },
-                );
                 let program = update::download(&release, plat, &update::public_key(), &mut fetch)?;
                 me.set(&ctx, State::Testing(v));
                 update::install(&exe, &program, |new| self_test(new, v))
             })();
+            INSTALLING.store(false, Ordering::SeqCst);
             me.set(
                 &ctx,
                 match result {
@@ -113,6 +124,21 @@ impl Updater {
 }
 
 static PROGRAM: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// An install is running (download, self-test or the file swap).
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+
+/// Waits (up to two minutes) for a running install to finish, so closing
+/// BDF can never stop it between moving the old program aside and moving
+/// the new one in.
+pub fn wait_for_install() {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    if INSTALLING.load(Ordering::SeqCst) {
+        log::info!("waiting for the update to finish before closing");
+    }
+    while INSTALLING.load(Ordering::SeqCst) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
 /// Set once an update is in place, so checking again does not offer it twice.
 static INSTALLED: Mutex<Option<Version>> = Mutex::new(None);
 
@@ -280,18 +306,29 @@ fn self_test(new: &Path, want: Version) -> Result<(), String> {
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("it would not start: {e}"))?;
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
-    let reader = std::thread::spawn(move || {
-        let (mut o, mut e) = (String::new(), String::new());
-        if let Some(s) = stdout.as_mut() {
-            let _ = s.read_to_string(&mut o);
-        }
-        if let Some(s) = stderr.as_mut() {
-            let _ = s.read_to_string(&mut e);
-        }
-        (o, e)
-    });
+    // One thread per pipe: reading them in turn would let a full stderr
+    // pipe block the child before it closes stdout.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_string(&mut s);
+            }
+            s
+        })
+    };
+    let out_reader = drain(
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
+    let err_reader = drain(
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
+    );
     let deadline = Instant::now() + Duration::from_secs(90);
     let status = loop {
         match child.try_wait() {
@@ -305,10 +342,18 @@ fn self_test(new: &Path, want: Version) -> Result<(), String> {
             Err(e) => return Err(e.to_string()),
         }
     };
-    let (out, err) = reader.join().unwrap_or_default();
+    let out = out_reader.join().unwrap_or_default();
+    let err = err_reader.join().unwrap_or_default();
     let ok = format!("BDF {want} self-test ok");
     if status.success() && out.lines().any(|l| l.trim() == ok) {
         Ok(())
+    } else if let Some(other) = out
+        .lines()
+        .find_map(|l| l.trim().strip_suffix(" self-test ok"))
+    {
+        Err(format!(
+            "it is {other}, not the BDF {want} the release promised"
+        ))
     } else {
         let why = err
             .lines()

@@ -136,9 +136,9 @@ pub struct PdfiumEngine {
 struct Doc {
     handle: FPDF_DOCUMENT,
     form: FPDF_FORMHANDLE,
-    // PDFium keeps pointers to these; they are boxed so they never move.
-    form_info: Option<Box<FormInfo>>,
-    access: Box<Access>,
+    // PDFium keeps pointers to these; see [`Shared`].
+    form_info: Option<Shared<FormInfo>>,
+    access: Shared<Access>,
     path: PathBuf,
     password: Option<String>,
     sizes: Vec<(f32, f32)>,
@@ -257,7 +257,7 @@ impl PdfiumEngine {
         &self,
         path: &Path,
         password: Option<&str>,
-    ) -> Result<(FPDF_DOCUMENT, Box<Access>), OpenError> {
+    ) -> Result<(FPDF_DOCUMENT, Shared<Access>), OpenError> {
         let file = File::open(path).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => OpenError::NotFound,
             _ => OpenError::Unreadable(e.to_string()),
@@ -275,9 +275,13 @@ impl PdfiumEngine {
                 "files larger than 4 GB are not supported on this platform".into(),
             ));
         }
-        let mut access = Access::new(file, len);
-        // SAFETY: `access` is boxed and outlives the document (stored in Doc).
-        let handle = unsafe { self.lib.FPDF_LoadCustomDocument(&mut access.fa, password) };
+        let access = Access::new(file, len);
+        // SAFETY: `access` outlives the document (it is stored in Doc and freed
+        // after FPDF_CloseDocument); PDFium gets a pointer to the whole Access.
+        let handle = unsafe {
+            self.lib
+                .FPDF_LoadCustomDocument(access.ptr().cast(), password)
+        };
         if handle.is_null() {
             // SAFETY: plain query.
             let err = unsafe { self.lib.FPDF_GetLastError() };
@@ -296,7 +300,7 @@ impl PdfiumEngine {
     fn build_doc(
         &self,
         handle: FPDF_DOCUMENT,
-        access: Box<Access>,
+        access: Shared<Access>,
         path: &Path,
         password: Option<&str>,
     ) -> Result<Doc, OpenError> {
@@ -334,14 +338,16 @@ impl PdfiumEngine {
         let (form, form_info) = if has_form {
             // SAFETY: an all-zero FPDF_FORMFILLINFO (null callbacks) is valid
             // input; PDFium checks each callback before use.
-            let mut info = Box::new(FormInfo {
+            let mut info = FormInfo {
                 info: unsafe { std::mem::zeroed() },
                 changed: false,
-            });
+            };
             info.info.version = 1;
             info.info.FFI_OnChange = Some(on_form_change);
-            // SAFETY: `info` is boxed and kept alive in Doc until the form exits.
-            let form = unsafe { lib.FPDFDOC_InitFormFillEnvironment(handle, &mut info.info) };
+            let info = Shared::new(info);
+            // SAFETY: `info` is kept in Doc until after the form exits; PDFium
+            // gets a pointer to the whole FormInfo.
+            let form = unsafe { lib.FPDFDOC_InitFormFillEnvironment(handle, info.ptr().cast()) };
             if !form.is_null() {
                 // Tint fillable fields light blue, like other readers do.
                 // SAFETY: valid form handle; 0 means every field type.
@@ -428,13 +434,16 @@ impl PdfiumEngine {
                 buf.truncate(n - 1); // drop the NUL
                 format!("id:{}", hex(&buf))
             } else {
-                format!("fp:{:016x}:{}", doc.access.head_hash(), doc.access.len)
+                // SAFETY: no PDFium call is running, so no callback holds it.
+                let a = unsafe { doc.access.get() };
+                format!("fp:{:016x}:{}", a.head_hash(), a.len)
             }
         };
         let outline = read_outline(lib, h);
         DocInfo {
             path: path.to_path_buf(),
-            file_size: doc.access.len,
+            // SAFETY: as above.
+            file_size: unsafe { doc.access.get() }.len,
             page_sizes: doc.sizes.clone(),
             page_labels: labels,
             outline,
@@ -933,10 +942,15 @@ impl Engine for PdfiumEngine {
         let lib = &*self.lib;
         let doc = self.docs.get_mut(&id).ok_or("document is not open")?;
         let form = doc.form;
-        let Some(info) = doc.form_info.as_mut().filter(|_| !form.is_null()) else {
+        let Some(info) = doc.form_info.as_ref().filter(|_| !form.is_null()) else {
             return Ok(FormOutcome::default());
         };
-        info.changed = false;
+        // PDFium's change callback writes `changed` through its own pointer
+        // during the calls below, so it is only touched through the raw
+        // pointer here, never through a reference held across them.
+        let changed = info.ptr();
+        // SAFETY: live object; no PDFium call is running.
+        unsafe { std::ptr::addr_of_mut!((*changed).changed).write(false) };
         let mods = |shift: bool, ctrl: bool| (shift as c_int) | ((ctrl as c_int) << 1);
         // SAFETY: page and form belong to the same open document.
         let handled = unsafe {
@@ -968,7 +982,8 @@ impl Engine for PdfiumEngine {
         Ok(FormOutcome {
             handled,
             focused,
-            changed: info.changed,
+            // SAFETY: live object; the PDFium calls have returned.
+            changed: unsafe { std::ptr::addr_of!((*changed).changed).read() },
         })
     }
 
@@ -994,15 +1009,17 @@ impl Engine for PdfiumEngine {
         {
             let file =
                 File::create(&tmp).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-            let mut w = Box::new(Writer::new(file));
+            let w = Shared::new(Writer::new(file));
             let flags = if incremental {
                 FPDF_INCREMENTAL
             } else {
                 FPDF_NO_INCREMENTAL
             };
-            // SAFETY: `w` lives across the call; its first field is the FPDF_FILEWRITE.
-            let ok = unsafe { lib.FPDF_SaveAsCopy(doc.handle, &mut w.fw, flags as _) };
-            let finished = w.finish();
+            // SAFETY: `w` lives across the call; PDFium gets a pointer to the
+            // whole Writer, whose first field is the FPDF_FILEWRITE.
+            let ok = unsafe { lib.FPDF_SaveAsCopy(doc.handle, w.ptr().cast(), flags as _) };
+            // SAFETY: the save has returned; nothing else points at it now.
+            let finished = unsafe { w.get_mut() }.finish();
             if ok == 0 || finished.is_err() {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(match finished {
@@ -1126,6 +1143,54 @@ fn replace_file(tmp: &Path, target: &Path) -> std::io::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Objects PDFium calls back into.
+
+/// An object PDFium keeps a pointer to and calls back into (file access,
+/// form callbacks, save output).
+///
+/// It is owned through the raw pointer from `Box::leak`, not through a `Box`
+/// that is moved around: a `Box` promises the optimiser that nothing else
+/// touches its contents, which PDFium's callbacks do. PDFium always gets a
+/// pointer to the whole object (its first field is the C struct), so a
+/// callback may reach the rest of it. Rust code only touches it while no
+/// PDFium call is running.
+struct Shared<T>(std::ptr::NonNull<T>);
+
+impl<T> Shared<T> {
+    fn new(value: T) -> Self {
+        Shared(std::ptr::NonNull::from(Box::leak(Box::new(value))))
+    }
+
+    fn ptr(&self) -> *mut T {
+        self.0.as_ptr()
+    }
+
+    /// # Safety
+    /// No PDFium call that may call back into this object is running.
+    unsafe fn get(&self) -> &T {
+        // SAFETY: valid for our lifetime; the caller rules out concurrent writes.
+        unsafe { self.0.as_ref() }
+    }
+
+    /// # Safety
+    /// As for [`Shared::get`], and the reference is dropped before PDFium
+    /// runs again.
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn get_mut(&self) -> &mut T {
+        // SAFETY: as above.
+        unsafe { &mut *self.0.as_ptr() }
+    }
+}
+
+impl<T> Drop for Shared<T> {
+    fn drop(&mut self) {
+        // SAFETY: from Box::leak in `new`, freed once; every owner releases
+        // it only after PDFium has let go of the pointer.
+        drop(unsafe { Box::from_raw(self.0.as_ptr()) });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // File access: PDFium pulls bytes through this callback.
 
 #[repr(C)]
@@ -1142,8 +1207,8 @@ const BLOCK: u64 = 128 * 1024;
 const MAX_BLOCKS: usize = 16;
 
 impl Access {
-    fn new(file: File, len: u64) -> Box<Self> {
-        let mut a = Box::new(Access {
+    fn new(file: File, len: u64) -> Shared<Self> {
+        let a = Shared::new(Access {
             fa: FPDF_FILEACCESS {
                 m_FileLen: c_ulong::try_from(len).unwrap_or(c_ulong::MAX),
                 m_GetBlock: Some(get_block),
@@ -1153,8 +1218,9 @@ impl Access {
             len,
             blocks: Vec::new(),
         });
-        let p: *mut Access = &mut *a;
-        a.fa.m_Param = p.cast();
+        let p = a.ptr();
+        // SAFETY: freshly made and not yet handed to PDFium.
+        unsafe { std::ptr::addr_of_mut!((*p).fa.m_Param).write(p.cast()) };
         a
     }
 
